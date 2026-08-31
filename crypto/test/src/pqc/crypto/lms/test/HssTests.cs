@@ -59,6 +59,87 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
         }
 
         /**
+         * A multi-level HSS private key in the version 0 encoding - written by any release before the tree-cache
+         * feature, whose component keys end at the master secret - must still decode and sign. The component
+         * keys share one stream, so the cache cannot be detected from "more bytes available": the encoding
+         * version tells the parser whether the cache field is present (bc-java github #2365).
+         */
+        [Test]
+        public void TestVersion0HssKeyDecodes()
+        {
+            ImplVersion0HssKeyDecodes(1);
+            ImplVersion0HssKeyDecodes(2);
+            ImplVersion0HssKeyDecodes(3);
+        }
+
+        private void ImplVersion0HssKeyDecodes(int d)
+        {
+            HssPrivateKeyParameters generated = GenerateKey(d);
+
+            // Rewrite the version 1 encoding into what a pre-tree-cache release wrote: version 0, each component
+            // key ending at its master secret, with the chaining signatures unchanged.
+            byte[] enc = generated.GetEncoded();
+            Composer composer = Composer.Compose()
+                .U32Str(0) // version 0: pre-tree-cache component keys
+                .Bytes(enc, 4, 21); // l, index, indexLimit, isShard - unchanged
+            int pos = 25;
+            for (int t = 0; t < d; t++)
+            {
+                int m = LMSigParameters.GetParametersByID(ReadU32(enc, pos + 4)).M;
+                int keyCoreLength = 40 + ReadU32(enc, pos + 36); // up to and including the master secret
+                composer.Bytes(enc, pos, keyCoreLength);
+                int cacheCount = ReadU32(enc, pos + keyCoreLength);
+                pos += keyCoreLength + 4 + cacheCount * m; // skip the version 1 tree-cache field
+            }
+            composer.Bytes(enc, pos, enc.Length - pos); // the chaining signatures
+
+            HssPrivateKeyParameters decoded = HssPrivateKeyParameters.GetInstance(composer.Build());
+
+            Assert.AreEqual(generated.Level, decoded.Level);
+            Assert.AreEqual(generated.GetIndex(), decoded.GetIndex());
+            Assert.AreEqual(generated.IndexLimit, decoded.IndexLimit);
+
+            HssSignature signature = Hss.GenerateSignature(decoded, Hex.Decode("ABCDEF"));
+            Assert.True(Hss.VerifySignature(generated.GetPublicKey(), signature, Hex.Decode("ABCDEF")));
+        }
+
+        /**
+         * The current encoding is version 1: the component keys always carry the tree-cache field, and the
+         * version - the first four bytes - is what a pre-cache release's decoder rejects cleanly instead of
+         * misparsing the cache as key material.
+         */
+        [Test]
+        public void TestVersion1HssKeyRoundTrip()
+        {
+            HssPrivateKeyParameters generated = GenerateKey(2);
+
+            byte[] enc = generated.GetEncoded();
+
+            Assert.AreEqual(1, ReadU32(enc, 0), "encoding version");
+
+            HssPrivateKeyParameters decoded = HssPrivateKeyParameters.GetInstance(enc);
+
+            Assert.True(decoded.Equals(generated));
+
+            HssSignature signature = Hss.GenerateSignature(decoded, Hex.Decode("ABCDEF"));
+            Assert.True(Hss.VerifySignature(generated.GetPublicKey(), signature, Hex.Decode("ABCDEF")));
+        }
+
+        private static HssPrivateKeyParameters GenerateKey(int d)
+        {
+            LmsParameters[] lmsParameters = new LmsParameters[d];
+            for (int t = 0; t < d; t++)
+            {
+                lmsParameters[t] = new LmsParameters(LMSigParameters.lms_sha256_n32_h5, LMOtsParameters.sha256_n32_w4);
+            }
+
+            return Hss.GenerateHssKeyPair(new HssKeyGenerationParameters(lmsParameters, new SecureRandom()));
+        }
+
+        private static int ReadU32(byte[] buf, int off) =>
+            (buf[off] << 24) | (buf[off + 1] << 16) | (buf[off + 2] << 8) | buf[off + 3];
+
+        /**
          * Test Case 1 Signature
          * From https://tools.ietf.org/html/rfc8554#appendix-F
          */

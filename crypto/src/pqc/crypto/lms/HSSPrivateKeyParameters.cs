@@ -73,7 +73,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
         internal static HssPrivateKeyParameters Parse(BinaryReader binaryReader)
         {
             int version = BinaryReaders.ReadInt32BigEndian(binaryReader);
-            if (version != 0)
+            if (version != 0 && version != 1)
                 throw new Exception("unknown version for HSS private key");
 
             int d = BinaryReaders.ReadInt32BigEndian(binaryReader);
@@ -87,7 +87,12 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             var keys = new List<LmsPrivateKeyParameters>(d);
             for (int t = 0; t < d; t++)
             {
-                keys.Add(LmsPrivateKeyParameters.Parse(binaryReader));
+                // The component keys share this stream with the keys and signatures that follow, so whether each
+                // one carries the tree-cache field cannot be inferred from the stream having more data - the
+                // encoding version says: a version 0 encoding predates the tree cache and its component keys end
+                // at the master secret, a version 1 component always carries the cache field (bc-java github
+                // #2365).
+                keys.Add(LmsPrivateKeyParameters.ReadKey(binaryReader, withCache: version != 0));
             }
 
             var signatures = new List<LmsSignature>(d - 1);
@@ -389,8 +394,11 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                 // Private keys are implementation dependent.
                 //
 
+                // Version 1: the component keys carry the mandatory tree-cache field their GetEncoded appends; a
+                // version 0 encoding (any release before the tree cache) carries them without it. The version
+                // dispatch in Parse is what keeps the shared stream unambiguous.
                 Composer composer = Composer.Compose()
-                    .U32Str(0) // Version.
+                    .U32Str(1) // Version.
                     .U32Str(m_level)
                     .U64Str(m_index)
                     .U64Str(m_indexLimit)

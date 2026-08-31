@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 
 using NUnit.Framework;
 
@@ -170,5 +171,145 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                 // Expected
             }
         }
+
+        /**
+         * Regression test for https://github.com/bcgit/bc-java/issues/2365 - GetEncoded() must carry the top of
+         * the Merkle tree so that the first signature made after a key is decoded does not have to rebuild the
+         * whole tree (which costs about as much as key generation). Also checks that the legacy encoding, which
+         * carries no cache, is still accepted.
+         */
+        [Test]
+        public void TestTreeCachePersistence()
+        {
+            byte[] seed = Hex.Decode("558b8966c48ae9cb898b423c83443aae014a72f1b1ab5cc85cf1d892903b5439");
+            byte[] I = Hex.Decode("d08fabd4a2091ff0a8cb4ed834e74534");
+            byte[] msg = Hex.Decode("54686520656e756d65726174696f6e20696e2074686520436f6e737469747574");
+
+            LMSigParameters sigParams = LMSigParameters.lms_sha256_n32_h5;
+            LMOtsParameters otsParams = LMOtsParameters.sha256_n32_w4;
+
+            LmsPrivateKeyParameters privateKey = Lms.GenerateKeys(sigParams, otsParams, 0, I, seed);
+            LmsPublicKeyParameters publicKey = privateKey.GetPublicKey();
+
+            int h = sigParams.H;
+            int m = sigParams.M;
+            int cacheTop = System.Math.Min(64, 1 << (h + 1));
+
+            byte[] enc = privateKey.GetEncoded();
+
+            // 72 byte body + u32 node count + (cacheTop - 1) nodes of m bytes each. The version stays 0 and the
+            // cache is appended as trailing data, matching the bc-java interchange format.
+            Assert.AreEqual(0, ReadU32(enc, 0));
+            Assert.AreEqual(cacheTop - 1, ReadU32(enc, 72));
+            Assert.AreEqual(72 + 4 + (cacheTop - 1) * m, enc.Length);
+
+            // The first cached node is the root of the Merkle tree - it must match the public key's T[1].
+            byte[] t1 = publicKey.GetT1();
+            Assert.True(Arrays.AreEqual(t1, 0, t1.Length, enc, 76, 76 + m));
+
+            // The decoded key signs correctly and byte-identically to a fresh key at the same index.
+            LmsPrivateKeyParameters decoded = LmsPrivateKeyParameters.GetInstance(enc);
+            LmsSignature sigFromDecoded = Lms.GenerateSign(decoded, msg);
+            Assert.True(Lms.VerifySignature(publicKey, sigFromDecoded, msg));
+
+            LmsPrivateKeyParameters fresh = Lms.GenerateKeys(sigParams, otsParams, 0, I, seed);
+            Assert.True(Arrays.AreEqual(sigFromDecoded.GetEncoded(), Lms.GenerateSign(fresh, msg).GetEncoded()));
+
+            // The signer must actually consume the persisted cache - this is the fix; without it the decoded
+            // key's cache is empty and the first signature rebuilds the whole tree. Corrupt a cached node on the
+            // q=0 authentication path (node 3) and the resulting signature no longer verifies. (If decode-time
+            // cache validation is ever added, this becomes a decode failure instead.)
+            byte[] corruptedEnc = Arrays.Clone(enc);
+            corruptedEnc[76 + 2 * m] ^= 1;
+            LmsPrivateKeyParameters corrupted = LmsPrivateKeyParameters.GetInstance(corruptedEnc);
+            Assert.False(Lms.VerifySignature(publicKey, Lms.GenerateSign(corrupted, msg), msg));
+
+            // An encoding with no trailing cache - what an older release writes - must still decode and sign
+            // correctly.
+            byte[] legacyEnc = Composer.Compose()
+                .U32Str(0)
+                .U32Str(sigParams.ID)
+                .U32Str(otsParams.ID)
+                .Bytes(I)
+                .U32Str(0)
+                .U32Str(1 << h)
+                .U32Str(seed.Length)
+                .Bytes(seed)
+                .Build();
+            Assert.AreEqual(72, legacyEnc.Length);
+
+            LmsPrivateKeyParameters legacy = LmsPrivateKeyParameters.GetInstance(legacyEnc);
+            Assert.True(Lms.VerifySignature(publicKey, Lms.GenerateSign(legacy, msg), msg));
+        }
+
+        [Test]
+        public void TestMalformedPrivateKeyTreeCache()
+        {
+            byte[] seed = Hex.Decode("558b8966c48ae9cb898b423c83443aae014a72f1b1ab5cc85cf1d892903b5439");
+            byte[] I = Hex.Decode("d08fabd4a2091ff0a8cb4ed834e74534");
+
+            LMSigParameters sigParams = LMSigParameters.lms_sha256_n32_h5;
+            LMOtsParameters otsParams = LMOtsParameters.sha256_n32_w4;
+            int m = sigParams.M;
+
+            //
+            // The number of nodes cached is capped (matching the interned-key table in the bc-java
+            // implementation), so read the limit off a freshly generated key of the same parameters rather than
+            // hard-coding it - the limit moves if that cap is resized.
+            //
+            byte[] sampleEnc = Lms.GenerateKeys(sigParams, otsParams, 0, I, seed).GetEncoded();
+            int cacheCountLimit = ReadU32(sampleEnc, 40 + m);
+
+            byte[] atLimit = Composer.Compose()
+                .U32Str(0)
+                .U32Str(sigParams.ID)
+                .U32Str(otsParams.ID)
+                .Bytes(I)
+                .U32Str(0)
+                .U32Str(1 << sigParams.H)
+                .U32Str(seed.Length)
+                .Bytes(seed)
+                .U32Str(cacheCountLimit)
+                .Bytes(new byte[cacheCountLimit * m])
+                .Build();
+
+            // The (bogus, all-zero) cache nodes come back out of GetEncoded - proof the decoder primed the
+            // cache with them rather than recomputing.
+            Assert.True(Arrays.AreEqual(atLimit, LmsPrivateKeyParameters.GetInstance(atLimit).GetEncoded()));
+
+            byte[] beyondLimit = Composer.Compose()
+                .U32Str(0)
+                .U32Str(sigParams.ID)
+                .U32Str(otsParams.ID)
+                .Bytes(I)
+                .U32Str(0)
+                .U32Str(1 << sigParams.H)
+                .U32Str(seed.Length)
+                .Bytes(seed)
+                .U32Str(cacheCountLimit + 1)
+                .Build();
+            var ex1 = Assert.Throws<InvalidDataException>(
+                () => LmsPrivateKeyParameters.GetInstance(beyondLimit));
+            Assert.True(ex1.Message.StartsWith("tree cache node count out of range"));
+
+            byte[] truncated = Composer.Compose()
+                .U32Str(0)
+                .U32Str(sigParams.ID)
+                .U32Str(otsParams.ID)
+                .Bytes(I)
+                .U32Str(0)
+                .U32Str(1 << sigParams.H)
+                .U32Str(seed.Length)
+                .Bytes(seed)
+                .U32Str(cacheCountLimit)
+                .Bytes(new byte[cacheCountLimit * m - 1])
+                .Build();
+            var ex2 = Assert.Throws<InvalidDataException>(
+                () => LmsPrivateKeyParameters.GetInstance(truncated));
+            Assert.True(ex2.Message.StartsWith("tree cache length exceeded"));
+        }
+
+        private static int ReadU32(byte[] buf, int off) =>
+            (buf[off] << 24) | (buf[off + 1] << 16) | (buf[off + 2] << 8) | buf[off + 3];
     }
 }

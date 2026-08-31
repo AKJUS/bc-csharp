@@ -16,6 +16,11 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                 privateKey.I);
         }
 
+        // The number of tree nodes eligible for the persisted cache (nodes 1 .. CacheTopLimit - 1: the top six
+        // levels of the tree). Mirrors the interned-key table size in the bc-java implementation, which defines
+        // the interchange format's cache-count limit.
+        private const int CacheTopLimit = 64;
+
         private byte[] I;
         private readonly LMSigParameters sigParameters;
         private LMOtsParameters otsParameters;
@@ -91,6 +96,47 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
         internal static LmsPrivateKeyParameters Parse(BinaryReader binaryReader)
         {
+            LmsPrivateKeyParameters key = ParseCore(binaryReader);
+
+            //
+            // Anything after the master secret is a cache of the top of the Merkle tree (see GetEncoded). Priming
+            // it here means the first signature made after the key is decoded does not have to rebuild the whole
+            // tree, which otherwise costs about as much as key generation. For a standalone key the cache is
+            // optional trailing data rather than a new version, matching the bc-java interchange format - at the
+            // cost of it being absent rather than malformed when a stream supplies no more bytes. Component keys
+            // inside an HSS private key share their stream with the keys and signatures that follow, so "more
+            // data" means nothing there - they are read via ReadKey, where the enclosing HSS encoding's version
+            // dictates whether the cache field is present (bc-java github #2365).
+            //
+            var stream = binaryReader.BaseStream;
+            if (stream.CanSeek && stream.Position < stream.Length)
+            {
+                ReadTreeCache(binaryReader, key);
+            }
+
+            return key;
+        }
+
+        /**
+         * Read a component key from a stream shared with the other keys and signatures of an HSS private key.
+         * Unlike the standalone Parse entry point, whether the tree-cache field is present is dictated by the
+         * caller - from the enclosing HSS encoding's version - rather than inferred from the stream having more
+         * data, which is meaningless mid-stream.
+         */
+        internal static LmsPrivateKeyParameters ReadKey(BinaryReader binaryReader, bool withCache)
+        {
+            LmsPrivateKeyParameters key = ParseCore(binaryReader);
+
+            if (withCache)
+            {
+                ReadTreeCache(binaryReader, key);
+            }
+
+            return key;
+        }
+
+        private static LmsPrivateKeyParameters ParseCore(BinaryReader binaryReader)
+        {
             int version = BinaryReaders.ReadInt32BigEndian(binaryReader);
             if (version != 0)
                 throw new Exception("unknown version for LMS private key");
@@ -111,6 +157,24 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             byte[] masterSecret = BinaryReaders.ReadBytesFully(binaryReader, l);
 
             return new LmsPrivateKeyParameters(sigParameter, otsParameter, q, I, maxQ, masterSecret);
+        }
+
+        private static void ReadTreeCache(BinaryReader binaryReader, LmsPrivateKeyParameters key)
+        {
+            int cacheCount = BinaryReaders.ReadInt32BigEndian(binaryReader);
+            if (cacheCount < 0 || cacheCount >= CacheTopLimit)
+                throw new InvalidDataException($"tree cache node count out of range: {cacheCount}");
+
+            int m = key.sigParameters.M;
+            var stream = binaryReader.BaseStream;
+            if (stream.CanSeek && (long)cacheCount * m > stream.Length - stream.Position)
+                throw new InvalidDataException($"tree cache length exceeded {stream.Length - stream.Position}");
+
+            // Entries match the state a freshly generated key reaches after its public key has been derived.
+            for (int r = 1; r <= cacheCount; r++)
+            {
+                key.tCache[r] = BinaryReaders.ReadBytesFully(binaryReader, m);
+            }
         }
 
         internal static LmsPrivateKeyParameters Parse(Stream stream) =>
@@ -348,7 +412,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             // It is implementation dependent.
             //
             // Format:
-            //     version u32
+            //     version u32                 (0)
             //     type u32
             //     otstype u32
             //     I u8x16
@@ -356,9 +420,21 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             //     maxQ u32
             //     master secret Length u32
             //     master secret u8[]
+            //     tree cache node count u32   (n; the top-of-tree nodes 1..n) - optional
+            //     tree cache nodes u8[]       (n * SigParameters.M bytes) - optional
+            //
+            // The tree cache carries the top of the Merkle tree so that the first signature made after the key
+            // is decoded does not have to rebuild the whole tree - which otherwise costs about as much as key
+            // generation (see bc-java github #2365). The nodes are a deterministic function of I, the master
+            // secret and the parameters and are independent of q, so persisting them leaks nothing the (already
+            // encoded) master secret does not. The cache is appended after the master secret rather than
+            // announced by a new version number, matching the bc-java interchange format, whose pre-cache
+            // decoders stop at the master secret and ignore the trailing bytes.
             //
 
-            return Composer.Compose()
+            int cacheTop = System.Math.Min(CacheTopLimit, maxCacheR);
+
+            Composer composer = Composer.Compose()
                 .U32Str(0) // version
                 .U32Str(sigParameters.ID) // type
                 .U32Str(otsParameters.ID) // ots type
@@ -367,7 +443,14 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                 .U32Str(maxQ) // maximum q
                 .U32Str(masterSecret.Length) // length of master secret.
                 .Bytes(masterSecret) // the master secret
-                .Build();
+                .U32Str(cacheTop - 1); // number of cached tree nodes (nodes 1 .. cacheTop-1)
+
+            for (int r = 1; r < cacheTop; r++)
+            {
+                composer.Bytes(FindT(r)); // top-of-tree node r
+            }
+
+            return composer.Build();
         }
     }
 }
