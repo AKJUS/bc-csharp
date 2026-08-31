@@ -3,6 +3,7 @@ using System.IO;
 
 using NUnit.Framework;
 
+using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.Encoders;
 
@@ -372,6 +373,37 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
 
             // the untouched encoding still decodes, and the cache survives the round trip
             Assert.True(Arrays.AreEqual(enc, LmsPrivateKeyParameters.GetInstance(enc).GetEncoded()));
+        }
+
+        /**
+         * An exhausted key refuses to issue further signing contexts with the dedicated exception type. The
+         * index is claimed atomically inside GenerateLmsContext, so the final usage's signature must still
+         * verify and the refusal must come from the claim itself.
+         */
+        [Test]
+        public void TestKeyExhaustion()
+        {
+            byte[] seed = Hex.Decode("558b8966c48ae9cb898b423c83443aae014a72f1b1ab5cc85cf1d892903b5439");
+            byte[] I = Hex.Decode("d08fabd4a2091ff0a8cb4ed834e74534");
+            byte[] msg = Hex.Decode("54686520656e756d65726174696f6e20696e2074686520436f6e737469747574");
+
+            LmsPrivateKeyParameters privateKey = Lms.GenerateKeys(
+                LMSigParameters.lms_sha256_n32_h5, LMOtsParameters.sha256_n32_w4, 0, I, seed);
+            LmsPublicKeyParameters publicKey = privateKey.GetPublicKey();
+
+            LmsPrivateKeyParameters shard = privateKey.ExtractKeyShard(1);
+            Assert.AreEqual(1, shard.GetUsagesRemaining());
+
+            // the last usage still signs correctly...
+            LmsSignature signature = Lms.GenerateSign(shard, msg);
+            Assert.True(Lms.VerifySignature(publicKey, signature, msg));
+            Assert.AreEqual(0, shard.GetUsagesRemaining());
+
+            // ...and the next attempt is refused
+            Assert.Throws<ExhaustedPrivateKeyException>(() => shard.GenerateLmsContext());
+
+            // the parent key's own usage range is unaffected
+            Assert.True(Lms.VerifySignature(publicKey, Lms.GenerateSign(privateKey, msg), msg));
         }
 
         /**

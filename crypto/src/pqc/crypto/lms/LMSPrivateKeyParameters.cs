@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.IO;
 
+using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.IO;
 
@@ -260,27 +261,43 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             return pKey;
         }
 
-        internal LMOtsPrivateKey GetCurrentOtsKey()
+        /// <summary>
+        /// Derive the identifier and master seed of the tree below the current one-time key of this key
+        /// (RFC 8554 sec. 6.1) - the child an HSS hierarchy hangs off leaf q. The index is not advanced.
+        /// </summary>
+        /// <returns>{ I of the child tree, master seed of the child tree }.</returns>
+        internal Tuple<byte[], byte[]> DeriveChildKey()
         {
+            int q;
             lock (this)
             {
+                q = this.q;
                 if (q >= maxQ)
-                    // TODO ExhaustedPrivateKeyException
-                    throw new Exception("ots private keys expired");
-
-                return new LMOtsPrivateKey(otsParameters, I, q, masterSecret);
+                    throw new ExhaustedPrivateKeyException("ots private key exhausted");
             }
+
+            int n = otsParameters.N;
+
+            SeedDerive deriver = new SeedDerive(I, masterSecret, LmsUtilities.GetDigest(otsParameters))
+            {
+                Q = q,
+                J = ~1,
+            };
+
+            byte[] childRootSeed = new byte[n];
+            deriver.DeriveSeed(true, childRootSeed, 0);
+            byte[] postImage = new byte[n];
+            deriver.DeriveSeed(false, postImage, 0);
+            byte[] childI = new byte[16];
+            Array.Copy(postImage, 0, childI, 0, childI.Length);
+
+            return new Tuple<byte[], byte[]>(childI, childRootSeed);
         }
 
-        /**
-         * Return the key index (the q value).
-         *
-         * @return private key index number.
-         */
+        /// <summary>Return the private key index number (the q value).</summary>
         public int GetIndex()
         {
-            lock (this)
-                return q;
+            lock (this) return q;
         }
 
         internal void IncIndex()
@@ -293,13 +310,27 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
         public LmsContext GenerateLmsContext()
         {
+            if (m_isPlaceholder)
+                throw new Exception("placeholder only");
+
             // Step 1.
             LMSigParameters lmsParameter = SigParameters;
 
             // Step 2
             int h = lmsParameter.H;
-            int q = GetIndex();
-            LMOtsPrivateKey otsPk = GetNextOtsPrivateKey();
+            int q;
+
+            //
+            // The index is claimed before the context is handed out, so a one-time key is never issued
+            // twice even if the caller then abandons the context.
+            //
+            lock (this)
+            {
+                if (this.q >= maxQ)
+                    throw new ExhaustedPrivateKeyException("ots private key exhausted");
+
+                q = this.q++;
+            }
 
             int i = 0;
             int r = (1 << h) + q;
@@ -312,7 +343,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                 path[i++] = FindT(tmp);
             }
 
-            return otsPk.GetSignatureContext(sigParameters, path);
+            return new LMOtsPrivateKey(otsParameters, I, q, masterSecret).GetSignatureContext(sigParameters, path);
         }
 
         public byte[] GenerateSignature(LmsContext context)
@@ -324,22 +355,6 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             catch (IOException e)
             {
                 throw new Exception($"unable to encode signature: {e.Message}", e);
-            }
-        }
-
-        internal LMOtsPrivateKey GetNextOtsPrivateKey()
-        {
-            if (m_isPlaceholder)
-                throw new Exception("placeholder only");
-
-            lock (this)
-            {
-                if (q >= maxQ)
-                    throw new Exception("ots private key exhausted");
-
-                LMOtsPrivateKey otsPrivateKey = new LMOtsPrivateKey(otsParameters, I, q, masterSecret);
-                IncIndex();
-                return otsPrivateKey;
             }
         }
 

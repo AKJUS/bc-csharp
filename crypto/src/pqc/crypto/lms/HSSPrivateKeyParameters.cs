@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.IO;
 
@@ -363,17 +362,9 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
         internal void ReplaceConsumedKey(int d)
         {
-            LMOtsPrivateKey currentOtsKey = m_keys[d - 1].GetCurrentOtsKey();
-            int n = currentOtsKey.Parameters.N;
-
-            SeedDerive deriver = currentOtsKey.GetDerivationFunction();
-            deriver.J = ~1;
-            byte[] childRootSeed = new byte[n];
-            deriver.DeriveSeed(true, childRootSeed, 0);
-            byte[] postImage = new byte[n];
-            deriver.DeriveSeed(false, postImage, 0);
-            byte[] childI = new byte[16];
-            Array.Copy(postImage, 0, childI, 0, childI.Length);
+            var childKey = m_keys[d - 1].DeriveChildKey();
+            byte[] childI = childKey.Item1;
+            byte[] childRootSeed = childKey.Item2;
 
             var newKeys = new List<LmsPrivateKeyParameters>(m_keys);
 

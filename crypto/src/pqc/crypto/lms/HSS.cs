@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 
+using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Security;
 
 namespace Org.BouncyCastle.Pqc.Crypto.Lms
@@ -96,8 +97,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             {
                 if (keyPair.GetIndex() >= keyPair.IndexLimit)
                 {
-                    // TODO ExhaustedPrivateKeyException
-                    throw new Exception(
+                    throw new ExhaustedPrivateKeyException(
                         "hss private key" + (keyPair.IsShard() ? " shard" : "") + " is exhausted");
                 }
 
@@ -109,8 +109,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                 while (prv[d - 1].GetIndex() >= 1 << prv[d - 1].SigParameters.H)
                 {
                     if (--d == 0)
-                        // TODO ExhaustedPrivateKeyException
-                        throw new Exception("hss private key" + (keyPair.IsShard() ? " shard" : "") +
+                        throw new ExhaustedPrivateKeyException("hss private key" + (keyPair.IsShard() ? " shard" : "") +
                             " is exhausted the maximum limit for this HSS private key");
                 }
 
