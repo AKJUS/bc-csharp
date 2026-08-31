@@ -128,7 +128,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             lock (keyPair)
             {
                 RangeTestKeys(keyPair);
-                
+
                 var keys = keyPair.GetKeys();
                 var sig = keyPair.GetSig();
 

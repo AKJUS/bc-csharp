@@ -22,7 +22,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
         public HssPrivateKeyParameters(int l, IList<LmsPrivateKeyParameters> keys, IList<LmsSignature> sig, long index,
             long indexLimit)
-    	    : base(true)
+            : base(true)
         {
             m_level = l;
             m_isShard = false;
@@ -39,7 +39,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
         private HssPrivateKeyParameters(int l, IList<LmsPrivateKeyParameters> keys, IList<LmsSignature> sig, long index,
             long indexLimit, bool isShard)
-    	    :base(true)
+            : base(true)
         {
 
             m_level = l;

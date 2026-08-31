@@ -268,7 +268,6 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
         internal byte[] FindT(int r)
         {
-            // TODO Should be > instead of >= ?
             if (r >= maxCacheR)
                 return CalcT(r);
 
