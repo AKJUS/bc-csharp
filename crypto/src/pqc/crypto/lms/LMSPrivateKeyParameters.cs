@@ -150,6 +150,16 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
             int maxQ = BinaryReaders.ReadInt32BigEndian(binaryReader);
 
+            // q selects the LM-OTS leaf and maxQ bounds it, so a stored value outside the tree is not a
+            // harmless oddity: the key signs with a one-time key the public key does not commit to, and the
+            // signature simply does not verify (bc-java github #2414). RFC 8554 sec. 5.3 has 0 <= q < 2^h;
+            // maxQ is 2^h for a whole key and lower for a shard (ExtractKeyShard), and q == maxQ is the
+            // legitimate exhausted state.
+            int twoToH = 1 << sigParameter.H;
+            if (q < 0 || maxQ < 0 || maxQ > twoToH || q > maxQ)
+                throw new InvalidDataException(
+                    $"LMS private key q/maxQ out of range: q={q} maxQ={maxQ} 2^h={twoToH}");
+
             int l = BinaryReaders.ReadInt32BigEndian(binaryReader);
             if (l < 0)
                 throw new Exception("secret length less than zero");
@@ -170,10 +180,54 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             if (stream.CanSeek && (long)cacheCount * m > stream.Length - stream.Position)
                 throw new InvalidDataException($"tree cache length exceeded {stream.Length - stream.Position}");
 
+            byte[][] cachedT = new byte[cacheCount + 1][];
+            for (int r = 1; r <= cacheCount; r++)
+            {
+                cachedT[r] = BinaryReaders.ReadBytesFully(binaryReader, m);
+            }
+
+            ValidateTreeCache(key, cachedT, cacheCount);
+
             // Entries match the state a freshly generated key reaches after its public key has been derived.
             for (int r = 1; r <= cacheCount; r++)
             {
-                key.tCache[r] = BinaryReaders.ReadBytesFully(binaryReader, m);
+                key.tCache[r] = cachedT[r];
+            }
+        }
+
+        /**
+         * Check the cached nodes are consistent with one another before they are trusted. Every node is a
+         * deterministic function of I, the master secret and the parameters, so a corrupt cache is detectable
+         * without rebuilding the tree: each cached interior node must be the hash of its two children, and for
+         * every node up to cacheCount / 2 both children are themselves cached. A single altered node therefore
+         * always fails its own parent's recomputation - including node 1, the root, whose children 2 and 3 are
+         * cached - so bit rot or a partial write in the stored key is refused here rather than primed into the
+         * tree, where it would change the public key the key reports or yield a signature that does not verify
+         * (bc-java github #2414).
+         * <p>
+         * Only interior nodes are recomputed. A cached node at or beyond 2^h is a leaf, and deriving one costs
+         * an LM-OTS public key - which is the work the cache exists to avoid; a corrupt leaf is still caught,
+         * by its cached parent. The check is (cacheCount - 1) / 2 hashes, independent of h.
+         * </p>
+         */
+        private static void ValidateTreeCache(LmsPrivateKeyParameters key, byte[][] cachedT, int cacheCount)
+        {
+            int twoToH = 1 << key.sigParameters.H;
+            var digest = LmsUtilities.GetDigest(key.sigParameters);
+
+            for (int r = 1; r < twoToH && 2 * r + 1 <= cacheCount; r++)
+            {
+                LmsUtilities.ByteArray(key.I, digest);
+                LmsUtilities.U32Str(r, digest);
+                LmsUtilities.U16Str((short)Lms.D_INTR, digest);
+                LmsUtilities.ByteArray(cachedT[2 * r], digest);
+                LmsUtilities.ByteArray(cachedT[2 * r + 1], digest);
+
+                byte[] node = new byte[digest.GetDigestSize()];
+                digest.DoFinal(node, 0);
+
+                if (!Arrays.AreEqual(node, cachedT[r]))
+                    throw new InvalidDataException($"LMS private key tree cache inconsistent at node {r}");
             }
         }
 
@@ -188,6 +242,20 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
         internal static LmsPrivateKeyParameters Parse(byte[] buf, int off, int len, LmsPublicKeyParameters publicKey)
         {
             LmsPrivateKeyParameters pKey = Parse(buf, off, len);
+
+            // The public key that arrived alongside the private one is authoritative, so where the tree
+            // already carries its root node in the cache it costs nothing to confirm the two agree. That
+            // catches a tree cache which is internally consistent but belongs to a different key - the one
+            // corruption the node-by-node check in ValidateTreeCache cannot see. It is deliberately skipped
+            // when the root is not cached: recomputing it there means rebuilding the whole tree, which is the
+            // work the cache exists to avoid (bc-java github #2414).
+            if (publicKey != null)
+            {
+                byte[] cachedRoot = pKey.PeekRootT();
+                if (cachedRoot != null && !Arrays.AreEqual(cachedRoot, publicKey.GetT1()))
+                    throw new InvalidDataException("LMS private key tree cache does not match the public key");
+            }
+
             pKey.m_publicKey = publicKey;
             return pKey;
         }
@@ -329,6 +397,13 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
             return Objects.EnsureSingletonInitialized(ref m_publicKey, this, DerivePublicKey);
         }
+
+        /**
+         * The root node if it is already in the cache, otherwise null. Unlike GetPublicKey() this never
+         * computes it, so a caller can cross-check the root against an authoritative public key without
+         * paying for a tree rebuild when there is nothing cached (bc-java github #2414).
+         */
+        internal byte[] PeekRootT() => tCache.TryGetValue(1, out byte[] rootT) ? rootT : null;
 
         internal byte[] FindT(int r)
         {

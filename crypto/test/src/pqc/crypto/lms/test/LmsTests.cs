@@ -215,14 +215,13 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
             LmsPrivateKeyParameters fresh = Lms.GenerateKeys(sigParams, otsParams, 0, I, seed);
             Assert.True(Arrays.AreEqual(sigFromDecoded.GetEncoded(), Lms.GenerateSign(fresh, msg).GetEncoded()));
 
-            // The signer must actually consume the persisted cache - this is the fix; without it the decoded
-            // key's cache is empty and the first signature rebuilds the whole tree. Corrupt a cached node on the
-            // q=0 authentication path (node 3) and the resulting signature no longer verifies. (If decode-time
-            // cache validation is ever added, this becomes a decode failure instead.)
+            // A corrupted cache node is caught at decode: each cached interior node is recomputed from its
+            // cached children and compared before the cache is primed into the tree (bc-java github #2414).
             byte[] corruptedEnc = Arrays.Clone(enc);
             corruptedEnc[76 + 2 * m] ^= 1;
-            LmsPrivateKeyParameters corrupted = LmsPrivateKeyParameters.GetInstance(corruptedEnc);
-            Assert.False(Lms.VerifySignature(publicKey, Lms.GenerateSign(corrupted, msg), msg));
+            var ex = Assert.Throws<InvalidDataException>(
+                () => LmsPrivateKeyParameters.GetInstance(corruptedEnc));
+            Assert.True(ex.Message.StartsWith("LMS private key tree cache inconsistent at node"));
 
             // An encoding with no trailing cache - what an older release writes - must still decode and sign
             // correctly.
@@ -260,7 +259,15 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
             byte[] sampleEnc = Lms.GenerateKeys(sigParams, otsParams, 0, I, seed).GetEncoded();
             int cacheCountLimit = ReadU32(sampleEnc, 40 + m);
 
-            byte[] atLimit = Composer.Compose()
+            // A cache at the limit is accepted. The node values have to be the real ones: they are a
+            // deterministic function of I, the master secret and the parameters, and are checked against each
+            // other at decode (bc-java github #2414), so the sample key's own encoding is used rather than a
+            // run of dummy bytes. The cache survives the round trip byte for byte.
+            Assert.True(Arrays.AreEqual(sampleEnc, LmsPrivateKeyParameters.GetInstance(sampleEnc).GetEncoded()));
+
+            // A cache whose count and length are in range but whose node values are not the ones the key
+            // derives is refused rather than primed into the tree (bc-java github #2414).
+            byte[] zeroed = Composer.Compose()
                 .U32Str(0)
                 .U32Str(sigParams.ID)
                 .U32Str(otsParams.ID)
@@ -272,10 +279,9 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                 .U32Str(cacheCountLimit)
                 .Bytes(new byte[cacheCountLimit * m])
                 .Build();
-
-            // The (bogus, all-zero) cache nodes come back out of GetEncoded - proof the decoder primed the
-            // cache with them rather than recomputing.
-            Assert.True(Arrays.AreEqual(atLimit, LmsPrivateKeyParameters.GetInstance(atLimit).GetEncoded()));
+            var ex0 = Assert.Throws<InvalidDataException>(
+                () => LmsPrivateKeyParameters.GetInstance(zeroed));
+            Assert.True(ex0.Message.StartsWith("LMS private key tree cache inconsistent at node"));
 
             byte[] beyondLimit = Composer.Compose()
                 .U32Str(0)
@@ -307,6 +313,65 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
             var ex2 = Assert.Throws<InvalidDataException>(
                 () => LmsPrivateKeyParameters.GetInstance(truncated));
             Assert.True(ex2.Message.StartsWith("tree cache length exceeded"));
+        }
+
+        /**
+         * Every single-byte corruption of the tree cache is rejected at decode, and the one-time index q and
+         * its limit maxQ are range checked. Both were unchecked before bc-java github #2414: a corrupt cache
+         * primed into the tree yields signatures that do not verify, and a q outside the tree signs with a
+         * one-time key the public key does not commit to.
+         */
+        [Test]
+        public void TestPrivateKeyDecodeValidation()
+        {
+            byte[] seed = Hex.Decode("558b8966c48ae9cb898b423c83443aae014a72f1b1ab5cc85cf1d892903b5439");
+            byte[] I = Hex.Decode("d08fabd4a2091ff0a8cb4ed834e74534");
+
+            LMSigParameters sigParams = LMSigParameters.lms_sha256_n32_h5;
+            LMOtsParameters otsParams = LMOtsParameters.sha256_n32_w4;
+            int m = sigParams.M;
+
+            LmsPrivateKeyParameters priv = Lms.GenerateKeys(sigParams, otsParams, 0, I, seed);
+            byte[] enc = priv.GetEncoded();
+
+            int countOff = 40 + ReadU32(enc, 36);
+            int cacheCount = ReadU32(enc, countOff);
+            int cacheOff = countOff + 4;
+            Assert.True(cacheCount > 0, "expected a primed cache to corrupt");
+
+            for (int r = 1; r <= cacheCount; r++)
+            {
+                byte[] corrupt = Arrays.Clone(enc);
+                corrupt[cacheOff + (r - 1) * m] ^= 0x01;
+                var ex = Assert.Throws<InvalidDataException>(
+                    () => LmsPrivateKeyParameters.GetInstance(corrupt), "no exception on corrupt cache node " + r);
+                Assert.True(ex.Message.StartsWith("LMS private key tree cache inconsistent at node"));
+            }
+
+            int twoToH = 1 << sigParams.H;
+            int[][] bad = { new int[]{ twoToH + 1, 1000 }, new int[]{ -1, twoToH },
+                new int[]{ int.MinValue, twoToH }, new int[]{ 0, twoToH + 1 }, new int[]{ 0, -1 },
+                new int[]{ 4, 3 } };
+            for (int i = 0; i != bad.Length; i++)
+            {
+                byte[] bogus = Composer.Compose()
+                    .U32Str(0)
+                    .U32Str(sigParams.ID)
+                    .U32Str(otsParams.ID)
+                    .Bytes(I)
+                    .U32Str(bad[i][0])
+                    .U32Str(bad[i][1])
+                    .U32Str(seed.Length)
+                    .Bytes(seed)
+                    .Build();
+                var ex = Assert.Throws<InvalidDataException>(
+                    () => LmsPrivateKeyParameters.GetInstance(bogus),
+                    "no exception on q=" + bad[i][0] + " maxQ=" + bad[i][1]);
+                Assert.True(ex.Message.StartsWith("LMS private key q/maxQ out of range"));
+            }
+
+            // the untouched encoding still decodes, and the cache survives the round trip
+            Assert.True(Arrays.AreEqual(enc, LmsPrivateKeyParameters.GetInstance(enc).GetEncoded()));
         }
 
         private static int ReadU32(byte[] buf, int off) =>

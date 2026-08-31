@@ -77,10 +77,16 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                 throw new Exception("unknown version for HSS private key");
 
             int d = BinaryReaders.ReadInt32BigEndian(binaryReader);
+            if (d < 1 || d > 8) // RFC 8554, Section 6.
+                throw new InvalidDataException($"d value of HSS private key out of range: {d}");
 
             long index = BinaryReaders.ReadInt64BigEndian(binaryReader);
 
             long maxIndex = BinaryReaders.ReadInt64BigEndian(binaryReader);
+
+            if (index < 0 || maxIndex < 0 || index > maxIndex)
+                throw new InvalidDataException(
+                    $"HSS private key index out of range: index={index} maxIndex={maxIndex}");
 
             bool limited = binaryReader.ReadBoolean();
 
@@ -115,6 +121,20 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
         internal static HssPrivateKeyParameters Parse(byte[] buf, int off, int len, HssPublicKeyParameters publicKey)
         {
             HssPrivateKeyParameters pKey = Parse(buf, off, len);
+
+            // The public key that arrived alongside the private one is authoritative, so where the root tree
+            // already carries its root node in the cache it costs nothing to confirm the two agree. That
+            // catches a tree cache which is internally consistent but belongs to a different key - the one
+            // corruption the node-by-node check in LmsPrivateKeyParameters cannot see. It is deliberately
+            // skipped when the root is not cached: recomputing it there means rebuilding the whole tree,
+            // which is the work the cache exists to avoid (bc-java github #2414).
+            if (publicKey != null)
+            {
+                byte[] cachedRoot = pKey.GetRootKey().PeekRootT();
+                if (cachedRoot != null && !Arrays.AreEqual(cachedRoot, publicKey.LmsPublicKey.GetT1()))
+                    throw new InvalidDataException("HSS private key tree cache does not match the public key");
+            }
+
             pKey.m_publicKey = publicKey;
             return pKey;
         }

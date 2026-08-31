@@ -104,7 +104,9 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                 int L = keyPair.Level;
                 int d = L;
                 var prv = keyPair.GetKeys();
-                while (prv[d - 1].GetIndex() == 1 << prv[d - 1].SigParameters.H)
+                // >= rather than ==: an index above 2^h steps straight over an equality test
+                // (bc-java github #2414). Decode now rejects such a q, so this is belt and braces.
+                while (prv[d - 1].GetIndex() >= 1 << prv[d - 1].SigParameters.H)
                 {
                     if (--d == 0)
                         // TODO ExhaustedPrivateKeyException

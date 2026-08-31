@@ -125,6 +125,85 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
             Assert.True(Hss.VerifySignature(generated.GetPublicKey(), signature, Hex.Decode("ABCDEF")));
         }
 
+        /**
+         * The level count d and the index pair are range checked at decode. Before bc-java github #2414 only
+         * the version was guarded, so d = 0 decoded and the empty key list then threw an unchecked exception
+         * out of the signing call rather than being refused as a bad key.
+         */
+        [Test]
+        public void TestPrivateKeyLevelCountRangeChecked()
+        {
+            HssPrivateKeyParameters key = GenerateKey(2);
+            byte[] enc = key.GetEncoded();
+
+            // d sits at offset 4, after the version
+            int[] badD = { 0, -1, 9, int.MinValue, int.MaxValue };
+            for (int i = 0; i != badD.Length; i++)
+            {
+                byte[] corrupt = Arrays.Clone(enc);
+                WriteU32(badD[i], corrupt, 4);
+                var ex = Assert.Throws<InvalidDataException>(
+                    () => HssPrivateKeyParameters.GetInstance(corrupt), "no exception on d = " + badD[i]);
+                Assert.True(ex.Message.StartsWith("d value of HSS private key out of range"));
+            }
+
+            // index at offset 8, maxIndex at 16, both u64
+            long[][] badIndex = { new long[]{ -1L, 1024L }, new long[]{ 0L, -1L }, new long[]{ 100L, 10L } };
+            for (int i = 0; i != badIndex.Length; i++)
+            {
+                byte[] corrupt = Arrays.Clone(enc);
+                WriteU64(badIndex[i][0], corrupt, 8);
+                WriteU64(badIndex[i][1], corrupt, 16);
+                var ex = Assert.Throws<InvalidDataException>(
+                    () => HssPrivateKeyParameters.GetInstance(corrupt),
+                    "no exception on index = " + badIndex[i][0] + " maxIndex = " + badIndex[i][1]);
+                Assert.True(ex.Message.StartsWith("HSS private key index out of range"));
+            }
+
+            // the genuine encoding still decodes and signs verifiably
+            HssPrivateKeyParameters decoded = HssPrivateKeyParameters.GetInstance(enc);
+            HssSignature signature = Hss.GenerateSignature(decoded, Hex.Decode("ABCDEF"));
+            Assert.True(Hss.VerifySignature(key.GetPublicKey(), signature, Hex.Decode("ABCDEF")));
+        }
+
+        /**
+         * GetInstance(privEnc, pubEnc) cross-checks the root against the public key it is handed, which
+         * catches a tree cache that is self-consistent but belongs to a different key (bc-java github #2414).
+         */
+        [Test]
+        public void TestPrivateKeyCheckedAgainstSuppliedPublicKey()
+        {
+            HssPrivateKeyParameters keyA = GenerateKey(2);
+            HssPrivateKeyParameters keyB = GenerateKey(2);
+
+            byte[] privA = keyA.GetEncoded();
+            byte[] pubA = keyA.GetPublicKey().GetEncoded();
+            byte[] pubB = keyB.GetPublicKey().GetEncoded();
+
+            // matching pair: accepted, and the public key reported agrees
+            HssPrivateKeyParameters decoded = HssPrivateKeyParameters.GetInstance(privA, pubA);
+            Assert.True(Arrays.AreEqual(pubA, decoded.GetPublicKey().GetEncoded()));
+
+            // another key's public key: refused
+            var ex = Assert.Throws<InvalidDataException>(
+                () => HssPrivateKeyParameters.GetInstance(privA, pubB));
+            Assert.True(ex.Message.StartsWith("HSS private key tree cache does not match"));
+        }
+
+        private static void WriteU32(int n, byte[] buf, int off)
+        {
+            buf[off] = (byte)(n >> 24);
+            buf[off + 1] = (byte)(n >> 16);
+            buf[off + 2] = (byte)(n >> 8);
+            buf[off + 3] = (byte)n;
+        }
+
+        private static void WriteU64(long n, byte[] buf, int off)
+        {
+            WriteU32((int)(n >> 32), buf, off);
+            WriteU32((int)n, buf, off + 4);
+        }
+
         private static HssPrivateKeyParameters GenerateKey(int d)
         {
             LmsParameters[] lmsParameters = new LmsParameters[d];
