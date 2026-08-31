@@ -374,6 +374,80 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
             Assert.True(Arrays.AreEqual(enc, LmsPrivateKeyParameters.GetInstance(enc).GetEncoded()));
         }
 
+        /**
+         * GetInstance(privEnc, pubEnc) cross-checks the cached root against the public key it is handed, which
+         * catches a tree cache that is self-consistent but belongs to a different key. This check goes beyond
+         * bc-java, which only applies it on the HSS entry point - the LMS path here is the one the PKCS#8
+         * factory uses.
+         */
+        [Test]
+        public void TestPrivateKeyCheckedAgainstSuppliedPublicKey()
+        {
+            byte[] seedA = Hex.Decode("558b8966c48ae9cb898b423c83443aae014a72f1b1ab5cc85cf1d892903b5439");
+            byte[] IA = Hex.Decode("d08fabd4a2091ff0a8cb4ed834e74534");
+            byte[] seedB = Hex.Decode("a1c4696e2608035a886100d05cd99945eb3370731884a8235e2fb3d4d71f2547");
+            byte[] IB = Hex.Decode("215f83b7ccb9acbcd08db97b0d04dc2b");
+
+            LMSigParameters sigParams = LMSigParameters.lms_sha256_n32_h5;
+            LMOtsParameters otsParams = LMOtsParameters.sha256_n32_w4;
+
+            LmsPrivateKeyParameters keyA = Lms.GenerateKeys(sigParams, otsParams, 0, IA, seedA);
+            LmsPrivateKeyParameters keyB = Lms.GenerateKeys(sigParams, otsParams, 0, IB, seedB);
+
+            byte[] privA = keyA.GetEncoded();
+            byte[] pubA = keyA.GetPublicKey().GetEncoded();
+            byte[] pubB = keyB.GetPublicKey().GetEncoded();
+
+            // matching pair: accepted, and the public key reported agrees
+            LmsPrivateKeyParameters decoded = LmsPrivateKeyParameters.GetInstance(privA, pubA);
+            Assert.True(Arrays.AreEqual(pubA, decoded.GetPublicKey().GetEncoded()));
+
+            // another key's public key: refused
+            var ex = Assert.Throws<InvalidDataException>(
+                () => LmsPrivateKeyParameters.GetInstance(privA, pubB));
+            Assert.True(ex.Message.StartsWith("LMS private key tree cache does not match"));
+        }
+
+        /**
+         * A private key encoding carrying an unknown LMS or LM-OTS type code is rejected with a clean parse
+         * exception. The C# ParseByID helpers always did this - bc-java had to fix an NPE leak here - so this
+         * pins the existing behaviour on the private key path.
+         */
+        [Test]
+        public void TestMalformedPrivateKeyTypeCode()
+        {
+            byte[] seed = Hex.Decode("558b8966c48ae9cb898b423c83443aae014a72f1b1ab5cc85cf1d892903b5439");
+            byte[] I = Hex.Decode("d08fabd4a2091ff0a8cb4ed834e74534");
+
+            byte[] unknownSigType = Composer.Compose()
+                .U32Str(0)
+                .U32Str(0x7fffffff) // bogus LMS type code
+                .U32Str(LMOtsParameters.sha256_n32_w4.ID)
+                .Bytes(I)
+                .U32Str(0)
+                .U32Str(32)
+                .U32Str(seed.Length)
+                .Bytes(seed)
+                .Build();
+            var ex1 = Assert.Throws<InvalidDataException>(
+                () => LmsPrivateKeyParameters.GetInstance(unknownSigType));
+            Assert.True(ex1.Message.StartsWith("unknown LMS type code"));
+
+            byte[] unknownOtsType = Composer.Compose()
+                .U32Str(0)
+                .U32Str(LMSigParameters.lms_sha256_n32_h5.ID)
+                .U32Str(0x7fffffff) // bogus LM-OTS type code
+                .Bytes(I)
+                .U32Str(0)
+                .U32Str(32)
+                .U32Str(seed.Length)
+                .Bytes(seed)
+                .Build();
+            var ex2 = Assert.Throws<InvalidDataException>(
+                () => LmsPrivateKeyParameters.GetInstance(unknownOtsType));
+            Assert.True(ex2.Message.StartsWith("unknown LM-OTS type code"));
+        }
+
         private static int ReadU32(byte[] buf, int off) =>
             (buf[off] << 24) | (buf[off + 1] << 16) | (buf[off + 2] << 8) | buf[off + 3];
     }
