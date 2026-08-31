@@ -180,69 +180,69 @@ namespace Org.BouncyCastle.Crypto.Digests
 
             for (int t = 0; ; t += 16)
             {
-                h += Sum1Ch(e, f, g) + K[t] + x00;
+                h += Sum1(e) + Ch(e, f, g) + K[t] + x00;
                 d += h;
-                h += Sum0Maj(a, b, c);
+                h += Sum0(a) + Maj(a, b, c);
 
-                g += Sum1Ch(d, e, f) + K[t + 1] + x01;
+                g += Sum1(d) + Ch(d, e, f) + K[t + 1] + x01;
                 c += g;
-                g += Sum0Maj(h, a, b);
+                g += Sum0(h) + Maj(h, a, b);
 
-                f += Sum1Ch(c, d, e) + K[t + 2] + x02;
+                f += Sum1(c) + Ch(c, d, e) + K[t + 2] + x02;
                 b += f;
-                f += Sum0Maj(g, h, a);
+                f += Sum0(g) + Maj(g, h, a);
 
-                e += Sum1Ch(b, c, d) + K[t + 3] + x03;
+                e += Sum1(b) + Ch(b, c, d) + K[t + 3] + x03;
                 a += e;
-                e += Sum0Maj(f, g, h);
+                e += Sum0(f) + Maj(f, g, h);
 
-                d += Sum1Ch(a, b, c) + K[t + 4] + x04;
+                d += Sum1(a) + Ch(a, b, c) + K[t + 4] + x04;
                 h += d;
-                d += Sum0Maj(e, f, g);
+                d += Sum0(e) + Maj(e, f, g);
 
-                c += Sum1Ch(h, a, b) + K[t + 5] + x05;
+                c += Sum1(h) + Ch(h, a, b) + K[t + 5] + x05;
                 g += c;
-                c += Sum0Maj(d, e, f);
+                c += Sum0(d) + Maj(d, e, f);
 
-                b += Sum1Ch(g, h, a) + K[t + 6] + x06;
+                b += Sum1(g) + Ch(g, h, a) + K[t + 6] + x06;
                 f += b;
-                b += Sum0Maj(c, d, e);
+                b += Sum0(c) + Maj(c, d, e);
 
-                a += Sum1Ch(f, g, h) + K[t + 7] + x07;
+                a += Sum1(f) + Ch(f, g, h) + K[t + 7] + x07;
                 e += a;
-                a += Sum0Maj(b, c, d);
+                a += Sum0(b) + Maj(b, c, d);
 
-                h += Sum1Ch(e, f, g) + K[t + 8] + x08;
+                h += Sum1(e) + Ch(e, f, g) + K[t + 8] + x08;
                 d += h;
-                h += Sum0Maj(a, b, c);
+                h += Sum0(a) + Maj(a, b, c);
 
-                g += Sum1Ch(d, e, f) + K[t + 9] + x09;
+                g += Sum1(d) + Ch(d, e, f) + K[t + 9] + x09;
                 c += g;
-                g += Sum0Maj(h, a, b);
+                g += Sum0(h) + Maj(h, a, b);
 
-                f += Sum1Ch(c, d, e) + K[t + 10] + x10;
+                f += Sum1(c) + Ch(c, d, e) + K[t + 10] + x10;
                 b += f;
-                f += Sum0Maj(g, h, a);
+                f += Sum0(g) + Maj(g, h, a);
 
-                e += Sum1Ch(b, c, d) + K[t + 11] + x11;
+                e += Sum1(b) + Ch(b, c, d) + K[t + 11] + x11;
                 a += e;
-                e += Sum0Maj(f, g, h);
+                e += Sum0(f) + Maj(f, g, h);
 
-                d += Sum1Ch(a, b, c) + K[t + 12] + x12;
+                d += Sum1(a) + Ch(a, b, c) + K[t + 12] + x12;
                 h += d;
-                d += Sum0Maj(e, f, g);
+                d += Sum0(e) + Maj(e, f, g);
 
-                c += Sum1Ch(h, a, b) + K[t + 13] + x13;
+                c += Sum1(h) + Ch(h, a, b) + K[t + 13] + x13;
                 g += c;
-                c += Sum0Maj(d, e, f);
+                c += Sum0(d) + Maj(d, e, f);
 
-                b += Sum1Ch(g, h, a) + K[t + 14] + x14;
+                b += Sum1(g) + Ch(g, h, a) + K[t + 14] + x14;
                 f += b;
-                b += Sum0Maj(c, d, e);
+                b += Sum0(c) + Maj(c, d, e);
 
-                a += Sum1Ch(f, g, h) + K[t + 15] + x15;
+                a += Sum1(f) + Ch(f, g, h) + K[t + 15] + x15;
                 e += a;
-                a += Sum0Maj(b, c, d);
+                a += Sum0(b) + Maj(b, c, d);
 
                 if (t == 48)
                     break;
@@ -283,88 +283,37 @@ namespace Org.BouncyCastle.Crypto.Digests
             Array.Clear(X, 0, 16);
         }
 
-        private static uint Sum1Ch(uint x, uint y, uint z)
-        {
-//          return Sum1(x) + Ch(x, y, z);
-            return (((x >> 6) | (x << 26)) ^ ((x >> 11) | (x << 21)) ^ ((x >> 25) | (x << 7)))
-                //+ ((x & y) ^ ((~x) & z));
-                + (z ^ (x & (y ^ z)));
-        }
+        //private static uint Ch(uint x, uint y, uint z) => (x & y) ^ (z & ~x);
+        private static uint Ch(uint x, uint y, uint z) => z ^ (x & (y ^ z));
 
-        private static uint Sum0Maj(uint x, uint y, uint z)
-        {
-//          return Sum0(x) + Maj(x, y, z);
-            return (((x >> 2) | (x << 30)) ^ ((x >> 13) | (x << 19)) ^ ((x >> 22) | (x << 10)))
-                //+ ((x & y) ^ (x & z) ^ (y & z));
-                + ((x & y) | (z & (x ^ y)));
-        }
+        //private static uint Maj(uint x, uint y, uint z) => (x & y) ^ (x & z) ^ (y & z);
+        private static uint Maj(uint x, uint y, uint z) => (x & y) | (z & (x ^ y));
 
-//      /* SHA-256 functions */
-//        private static uint Ch(uint x, uint y, uint z)
-//        {
-//            return (x & y) ^ ((~x) & z);
-//            //return z ^ (x & (y ^ z));
-//        }
-//
-//        private static uint Maj(uint x, uint y, uint z)
-//        {
-//            //return (x & y) ^ (x & z) ^ (y & z);
-//            return (x & y) | (z & (x ^ y));
-//        }
-//
-//        private static uint Sum0(uint x)
-//        {
-//          return ((x >> 2) | (x << 30)) ^ ((x >> 13) | (x << 19)) ^ ((x >> 22) | (x << 10));
-//        }
-//
-//        private static uint Sum1(uint x)
-//        {
-//          return ((x >> 6) | (x << 26)) ^ ((x >> 11) | (x << 21)) ^ ((x >> 25) | (x << 7));
-//        }
+        private static uint Sum0(uint x) => (x >> 2 | x << 30) ^ (x >> 13 | x << 19) ^ (x >> 22 | x << 10);
 
-        private static uint Theta0(uint x)
-        {
-            return ((x >> 7) | (x << 25)) ^ ((x >> 18) | (x << 14)) ^ (x >> 3);
-        }
+        private static uint Sum1(uint x) => (x >> 6 | x << 26) ^ (x >> 11 | x << 21) ^ (x >> 25 | x << 7);
 
-        private static uint Theta1(uint x)
-        {
-            return ((x >> 17) | (x << 15)) ^ ((x >> 19) | (x << 13)) ^ (x >> 10);
-        }
+        private static uint Theta0(uint x) => (x >> 7 | x << 25) ^ (x >> 18 | x << 14) ^ (x >> 3);
 
-        /* SHA-256 Constants
-        * (represent the first 32 bits of the fractional parts of the
-        * cube roots of the first sixty-four prime numbers)
-        */
+        private static uint Theta1(uint x) => (x >> 17 | x << 15) ^ (x >> 19 | x << 13) ^ (x >> 10);
+
+        /// <summary>
+        /// SHA-256 Constants (represent the first 32 bits of the fractional parts of the cube roots of the first
+        /// sixty-four prime numbers)
+        /// </summary>
         private static readonly uint[] K = {
-            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
-            0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
-            0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
-            0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-            0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-            0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
-            0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
-            0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
-            0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
         };
 
-        public override IMemoable Copy()
-        {
-            return new Sha256Digest(this);
-        }
+        public override IMemoable Copy() => new Sha256Digest(this);
 
-        public override void Reset(IMemoable other)
-        {
-            Sha256Digest d = (Sha256Digest)other;
-
-            CopyIn(d);
-        }
+        public override void Reset(IMemoable other) => CopyIn((Sha256Digest)other);
     }
 }

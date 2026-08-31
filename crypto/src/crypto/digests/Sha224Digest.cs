@@ -284,41 +284,24 @@ namespace Org.BouncyCastle.Crypto.Digests
             Array.Clear(X, 0, 16);
         }
 
-        /* SHA-224 functions */
-        private static uint Ch(uint x, uint y, uint z)
-        {
-            return (x & y) ^ (~x & z);
-        }
+        //private static uint Ch(uint x, uint y, uint z) => (x & y) ^ (z & ~x);
+        private static uint Ch(uint x, uint y, uint z) => z ^ (x & (y ^ z));
 
-        private static uint Maj(uint x, uint y, uint z)
-        {
-            return (x & y) ^ (x & z) ^ (y & z);
-        }
+        //private static uint Maj(uint x, uint y, uint z) => (x & y) ^ (x & z) ^ (y & z);
+        private static uint Maj(uint x, uint y, uint z) => (x & y) | (z & (x ^ y));
 
-        private static uint Sum0(uint x)
-        {
-            return ((x >> 2) | (x << 30)) ^ ((x >> 13) | (x << 19)) ^ ((x >> 22) | (x << 10));
-        }
+        private static uint Sum0(uint x) => (x >> 2 | x << 30) ^ (x >> 13 | x << 19) ^ (x >> 22 | x << 10);
 
-        private static uint Sum1(uint x)
-        {
-            return ((x >> 6) | (x << 26)) ^ ((x >> 11) | (x << 21)) ^ ((x >> 25) | (x << 7));
-        }
+        private static uint Sum1(uint x) => (x >> 6 | x << 26) ^ (x >> 11 | x << 21) ^ (x >> 25 | x << 7);
 
-        private static uint Theta0(uint x)
-        {
-            return ((x >> 7) | (x << 25)) ^ ((x >> 18) | (x << 14)) ^ (x >> 3);
-        }
+        private static uint Theta0(uint x) => (x >> 7 | x << 25) ^ (x >> 18 | x << 14) ^ (x >> 3);
 
-        private static uint Theta1(uint x)
-        {
-            return ((x >> 17) | (x << 15)) ^ ((x >> 19) | (x << 13)) ^ (x >> 10);
-        }
+        private static uint Theta1(uint x) => (x >> 17 | x << 15) ^ (x >> 19 | x << 13) ^ (x >> 10);
 
-        /* SHA-224 Constants
-         * (represent the first 32 bits of the fractional parts of the
-         * cube roots of the first sixty-four prime numbers)
-         */
+        /// <summary>
+        /// SHA-256 Constants (represent the first 32 bits of the fractional parts of the cube roots of the first
+        /// sixty-four prime numbers)
+        /// </summary>
         internal static readonly uint[] K = {
             0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
             0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -330,16 +313,8 @@ namespace Org.BouncyCastle.Crypto.Digests
             0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
         };
 
-        public override IMemoable Copy()
-        {
-            return new Sha224Digest(this);
-        }
+        public override IMemoable Copy() => new Sha224Digest(this);
 
-        public override void Reset(IMemoable other)
-        {
-            Sha224Digest d = (Sha224Digest)other;
-
-            CopyIn(d);
-        }
+        public override void Reset(IMemoable other) => CopyIn((Sha224Digest)other);
     }
 }

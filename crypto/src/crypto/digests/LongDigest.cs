@@ -1,6 +1,5 @@
 using System;
 
-using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Utilities;
 using Org.BouncyCastle.Utilities;
 
@@ -372,41 +371,24 @@ namespace Org.BouncyCastle.Crypto.Digests
             Array.Clear(W, 0, 16);
         }
 
-        /* SHA-384 and SHA-512 functions (as for SHA-256 but for longs) */
-        private static ulong Ch(ulong x, ulong y, ulong z)
-        {
-            return (x & y) ^ (~x & z);
-        }
+        //private static ulong Ch(ulong x, ulong y, ulong z) => (x & y) ^ (z & ~x);
+        private static ulong Ch(ulong x, ulong y, ulong z) => z ^ (x & (y ^ z));
 
-        private static ulong Maj(ulong x, ulong y, ulong z)
-        {
-            return (x & y) ^ (x & z) ^ (y & z);
-        }
+        //private static ulong Maj(ulong x, ulong y, ulong z) => (x & y) ^ (x & z) ^ (y & z);
+        private static ulong Maj(ulong x, ulong y, ulong z) => (x & y) | (z & (x ^ y));
 
-        private static ulong Sum0(ulong x)
-        {
-            return ((x << 36) | (x >> 28)) ^ ((x << 30) | (x >> 34)) ^ ((x << 25) | (x >> 39));
-        }
+        private static ulong Sum0(ulong x) => (x << 36 | x >> 28) ^ (x << 30 | x >> 34) ^ (x << 25 | x >> 39);
 
-        private static ulong Sum1(ulong x)
-        {
-            return ((x << 50) | (x >> 14)) ^ ((x << 46) | (x >> 18)) ^ ((x << 23) | (x >> 41));
-        }
+        private static ulong Sum1(ulong x) => (x << 50 | x >> 14) ^ (x << 46 | x >> 18) ^ (x << 23 | x >> 41);
 
-        private static ulong Sigma0(ulong x)
-        {
-            return ((x << 63) | (x >> 1)) ^ ((x << 56) | (x >> 8)) ^ (x >> 7);
-        }
+        private static ulong Sigma0(ulong x) => (x << 63 | x >> 1) ^ (x << 56 | x >> 8) ^ (x >> 7);
 
-        private static ulong Sigma1(ulong x)
-        {
-            return ((x << 45) | (x >> 19)) ^ ((x << 3) | (x >> 61)) ^ (x >> 6);
-        }
+        private static ulong Sigma1(ulong x) => (x << 45 | x >> 19) ^ (x << 3 | x >> 61) ^ (x >> 6);
 
-        /* SHA-384 and SHA-512 Constants
-         * (represent the first 64 bits of the fractional parts of the
-         * cube roots of the first sixty-four prime numbers)
-         */
+        /// <summary>
+        /// SHA-512 Constants (represent the first 64 bits of the fractional parts of the cube roots of the first
+        /// sixty-four prime numbers)
+        /// </summary>
         internal static readonly ulong[] K =
         {
             0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5dba58189dbbc,
