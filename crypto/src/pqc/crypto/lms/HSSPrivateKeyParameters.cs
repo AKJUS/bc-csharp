@@ -3,10 +3,12 @@ using System.Collections.Generic;
 using System.IO;
 
 using Org.BouncyCastle.Utilities;
+using Org.BouncyCastle.Utilities.Collections;
 using Org.BouncyCastle.Utilities.IO;
 
 namespace Org.BouncyCastle.Pqc.Crypto.Lms
 {
+    // TODO[api] Make sealed
     public class HssPrivateKeyParameters
         : LmsKeyParameters, ILmsContextBasedSigner
     {
@@ -16,8 +18,6 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
         private IList<LmsSignature> m_sig;
         private readonly long m_indexLimit;
         private long m_index = 0;
-
-        private HssPublicKeyParameters m_publicKey;
 
         public HssPrivateKeyParameters(int l, IList<LmsPrivateKeyParameters> keys, IList<LmsSignature> sig, long index,
             long indexLimit)
@@ -40,13 +40,12 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             long indexLimit, bool isShard)
             : base(true)
         {
-
             m_level = l;
-            m_isShard = isShard;
             m_keys = new List<LmsPrivateKeyParameters>(keys);
             m_sig = new List<LmsSignature>(sig);
             m_index = index;
             m_indexLimit = indexLimit;
+            m_isShard = isShard;
         }
 
         public static HssPrivateKeyParameters GetInstance(byte[] privEnc, byte[] pubEnc) =>
@@ -134,7 +133,6 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                     throw new InvalidDataException("HSS private key tree cache does not match the public key");
             }
 
-            pKey.m_publicKey = publicKey;
             return pKey;
         }
 
@@ -169,12 +167,16 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
         internal void IncIndex()
         {
-            lock (this) m_index++;
+            lock (this)
+            {
+                m_index++;
+            }
         }
 
         private static HssPrivateKeyParameters MakeCopy(HssPrivateKeyParameters privateKeyParameters) =>
             Parse(privateKeyParameters.GetEncoded());
 
+        // TODO[api] Make private
         protected void UpdateHierarchy(IList<LmsPrivateKeyParameters> newKeys, IList<LmsSignature> newSig)
         {
             lock (this)
@@ -190,7 +192,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
         public long GetUsagesRemaining() => IndexLimit - GetIndex();
 
-        internal LmsPrivateKeyParameters GetRootKey() => m_keys[0];
+        internal LmsPrivateKeyParameters GetRootKey() => GetKeys()[0];
 
         /**
          * Return a key that can be used usageCount times.
@@ -216,8 +218,8 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                 // Move this key's index along
                 m_index = shardIndexLimit;
 
-                var keys = new List<LmsPrivateKeyParameters>(this.GetKeys());
-                var sig = new List<LmsSignature>(this.GetSig());
+                var keys = new List<LmsPrivateKeyParameters>(m_keys);
+                var sig = new List<LmsSignature>(m_sig);
 
                 HssPrivateKeyParameters shard = MakeCopy(
                     new HssPrivateKeyParameters(m_level, keys, sig, shardIndex, shardIndexLimit, isShard: true));
@@ -230,24 +232,26 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
         public IList<LmsPrivateKeyParameters> GetKeys()
         {
-            lock (this) return m_keys;
+            lock (this) return CollectionUtilities.ReadOnly(m_keys);
         }
 
         internal IList<LmsSignature> GetSig()
         {
-            lock (this) return m_sig;
+            lock (this) return CollectionUtilities.ReadOnly(m_sig);
         }
 
-        /**
-         * Reset to index will ensure that all LMS keys are correct for a given HSS index value.
-         * Normally LMS keys updated in sync with their parent HSS key but in cases of sharding
-         * the normal monotonic updating does not apply and the state of the LMS keys needs to be
-         * reset to match the current HSS index.
-         */
-        void ResetKeyToIndex()
+        /// <summary>
+        /// Reset to index will ensure that all LMS keys are correct for a given HSS index value. Normally LMS keys are
+        /// updated in sync with their parent HSS key but in cases of sharding the normal monotonic updating does not
+        /// apply and the state of the LMS keys needs to be reset to match the current HSS index.
+        /// </summary>
+        /// <remarks>
+        /// Should only be called under the monitor (lock) or during construction before the instance escapes.
+        /// </remarks>
+        private void ResetKeyToIndex()
         {
             // Extract the original keys
-            var originalKeys = GetKeys();
+            var originalKeys = m_keys;
 
             long[] qTreePath = new long[originalKeys.Count];
             long q = GetIndex();
@@ -261,19 +265,17 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             }
 
             bool changed = false;
-
-            // LMSPrivateKeyParameters[] keys =  originalKeys.ToArray(new LMSPrivateKeyParameters[originalKeys.Count]);//  new LMSPrivateKeyParameters[originalKeys.Size()];
-            // LMSSignature[] sig = this.sig.toArray(new LMSSignature[this.sig.Count]);//   new LMSSignature[originalKeys.Size() - 1];
-            //
+            LmsPrivateKeyParameters[] keys = CollectionUtilities.ToArray(originalKeys);
+            LmsSignature[] sig = CollectionUtilities.ToArray(m_sig);
 
             LmsPrivateKeyParameters originalRootKey = this.GetRootKey();
 
             //
             // We need to replace the root key to a new q value.
             //
-            if (m_keys[0].GetIndex() - 1 != qTreePath[0])
+            if (keys[0].GetIndex() - 1 != qTreePath[0])
             {
-                m_keys[0] = Lms.GenerateKeys(
+                keys[0] = Lms.GenerateKeys(
                     originalRootKey.SigParameters,
                     originalRootKey.OtsParameters,
                     (int)qTreePath[0], originalRootKey.GetI(), originalRootKey.GetMasterSecret());
@@ -282,7 +284,10 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
             for (int i = 1; i < qTreePath.Length; i++)
             {
-                LmsPrivateKeyParameters intermediateKey = m_keys[i - 1];
+                LmsPrivateKeyParameters intermediateKey = keys[i - 1];
+
+                // TODO Refactor to use DeriveChildKey
+
                 int n = intermediateKey.OtsParameters.N;
 
                 byte[] childI = new byte[16];
@@ -307,22 +312,22 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                 // For the end key its value will match so no correction is required.
                 //
                 bool lmsQMatch = (i < qTreePath.Length - 1)
-                    ? qTreePath[i] == m_keys[i].GetIndex() - 1
-                    : qTreePath[i] == m_keys[i].GetIndex();
+                    ? qTreePath[i] == keys[i].GetIndex() - 1
+                    : qTreePath[i] == keys[i].GetIndex();
 
                 //
                 // Equality is I and seed being equal and the lmsQMath.
                 // I and seed are derived from this nodes parent and will change if the parent q, I, seed changes.
                 //
-                bool seedEquals = Arrays.AreEqual(childI, m_keys[i].GetI())
-                    && Arrays.AreEqual(childSeed, m_keys[i].GetMasterSecret());
+                bool seedEquals = Arrays.AreEqual(childI, keys[i].GetI())
+                    && Arrays.FixedTimeEquals(childSeed, keys[i].GetMasterSecret());
 
                 if (!seedEquals)
                 {
                     //
                     // This means the parent has changed.
                     //
-                    m_keys[i] = Lms.GenerateKeys(
+                    keys[i] = Lms.GenerateKeys(
                         originalKeys[i].SigParameters,
                         originalKeys[i].OtsParameters,
                         (int)qTreePath[i], childI, childSeed);
@@ -330,7 +335,8 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                     //
                     // Ensure post increment occurs on parent and the new public key is signed.
                     //
-                    m_sig[i - 1] = Lms.GenerateSign((LmsPrivateKeyParameters)m_keys[i - 1], ((LmsPrivateKeyParameters)m_keys[i]).GetPublicKey().ToByteArray());
+                    // TODO Update per bc-java 'signPublicKey'
+                    sig[i - 1] = Lms.GenerateSign(keys[i - 1], keys[i].GetPublicKey().ToByteArray());
                     changed = true;
                 }
                 else if (!lmsQMatch)
@@ -339,7 +345,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                     // Q is different so we can generate a new private key but it will have the same public
                     // key so we do not need to sign it again.
                     //
-                    m_keys[i] = Lms.GenerateKeys(
+                    keys[i] = Lms.GenerateKeys(
                         originalKeys[i].SigParameters,
                         originalKeys[i].OtsParameters,
                         (int)qTreePath[i], childI, childSeed);
@@ -350,7 +356,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             if (changed)
             {
                 // We mutate the HSS key here!
-                UpdateHierarchy(m_keys, m_sig);
+                UpdateHierarchy(keys, sig);
             }
         }
 
@@ -388,13 +394,45 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             if (this == obj)
                 return true;
 
-            return obj is HssPrivateKeyParameters that
-                && this.m_level == that.m_level
-                && this.m_isShard == that.m_isShard
-                && this.m_indexLimit == that.m_indexLimit
-                && this.m_index == that.m_index
-                && CompareLists(this.m_keys, that.m_keys)
-                && CompareLists(this.m_sig, that.m_sig);
+            if (!(obj is HssPrivateKeyParameters that) ||
+                this.m_level != that.m_level ||
+                this.m_isShard != that.m_isShard ||
+                this.m_indexLimit != that.m_indexLimit)
+            {
+                return false;
+            }
+
+            //
+            // index, keys and sig all move as consumed trees are replaced, and they move together -
+            // ReplaceConsumedKey assigns keys and sig one after the other under this monitor - so read
+            // each key's trio in one synchronized block to get a snapshot no unsynchronized reader
+            // could tear. The lists are unmodifiable and replaced rather than mutated, so a captured
+            // reference stays a coherent view after the lock drops. Neither monitor is held while the
+            // other is taken, so a.Equals(b) racing b.Equals(a) cannot deadlock.
+            //
+            long thisIndex;
+            IList<LmsPrivateKeyParameters> thisKeys;
+            IList<LmsSignature> thisSig;
+            lock (this)
+            {
+                thisIndex = this.m_index;
+                thisKeys = this.m_keys;
+                thisSig = this.m_sig;
+            }
+
+            long thatIndex;
+            IList<LmsPrivateKeyParameters> thatKeys;
+            IList<LmsSignature> thatSig;
+            lock (that)
+            {
+                thatIndex = that.m_index;
+                thatKeys = that.m_keys;
+                thatSig = that.m_sig;
+            }
+
+            return thisIndex == thatIndex
+                && CompareLists(thisKeys, thatKeys)
+                && CompareLists(thisSig, thatSig);
         }
 
         public override byte[] GetEncoded()
@@ -431,13 +469,20 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
         public override int GetHashCode()
         {
-            int result = m_level;
-            result = 31 * result + m_isShard.GetHashCode();
-            result = 31 * result + m_keys.GetHashCode();
-            result = 31 * result + m_sig.GetHashCode();
-            result = 31 * result + m_indexLimit.GetHashCode();
-            result = 31 * result + m_index.GetHashCode();
-            return result;
+            //
+            // Deliberately not GetPublicKey().GetHashCode(): that reaches the root key's tree, which is
+            // only built if the node cache does not already hold it - 2^h LM-OTS public keys from an
+            // implicit call no caller expects to cost anything. The fields used here are the ones that
+            // do not move as the key signs: the root key material is fixed (ResetKeyToIndex only
+            // repositions it, and LmsPrivateKeyParameters.GetHashCode is itself index-independent),
+            // whereas index, keys and sig all change. Equal keys agree on all of these, so the
+            // Equals() contract holds.
+            //
+            int hc = m_level;
+            hc = 31 * hc + (m_isShard ? 1 : 0);
+            hc = 31 * hc + m_indexLimit.GetHashCode();
+            hc = 31 * hc + GetRootKey().GetHashCode();
+            return hc;
         }
 
         protected object Clone()
@@ -455,17 +500,14 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             {
                 Hss.RangeTestKeys(this);
 
-                var keys = this.GetKeys();
-                var sig = this.GetSig();
-
-                nextKey = this.GetKeys()[level - 1];
+                nextKey = m_keys[level - 1];
 
                 // Step 2. Stand in for sig[level-1]
                 int i = 0;
                 signed_pub_key = new LmsSignedPubKey[level - 1];
                 while (i < level - 1)
                 {
-                    signed_pub_key[i] = new LmsSignedPubKey(sig[i], keys[i + 1].GetPublicKey());
+                    signed_pub_key[i] = new LmsSignedPubKey(m_sig[i], m_keys[i + 1].GetPublicKey());
                     ++i;
                 }
 
@@ -492,7 +534,11 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
         private static bool CompareLists<T>(IList<T> arr1, IList<T> arr2)
         {
-            for (int i = 0; i < arr1.Count && i < arr2.Count; i++)
+            if (ReferenceEquals(arr1, arr2))
+                return true;
+            if (arr1.Count != arr2.Count)
+                return false;
+            for (int i = 0; i < arr1.Count; ++i)
             {
                 if (!Object.Equals(arr1[i], arr2[i]))
                     return false;

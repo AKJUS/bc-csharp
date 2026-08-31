@@ -133,7 +133,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                 var keys = keyPair.GetKeys();
                 var sig = keyPair.GetSig();
 
-                nextKey = keyPair.GetKeys()[L - 1];
+                nextKey = keys[L - 1];
 
                 // Step 2. Stand in for sig[L-1]
                 int i = 0;

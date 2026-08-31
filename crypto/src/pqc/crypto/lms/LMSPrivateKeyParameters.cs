@@ -257,7 +257,11 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                     throw new InvalidDataException("LMS private key tree cache does not match the public key");
             }
 
-            pKey.m_publicKey = publicKey;
+            lock (pKey)
+            {
+                pKey.m_publicKey = publicKey;
+            }
+
             return pKey;
         }
 
@@ -410,7 +414,14 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             if (m_isPlaceholder)
                 throw new Exception("placeholder only");
 
-            return Objects.EnsureSingletonInitialized(ref m_publicKey, this, DerivePublicKey);
+            lock (this)
+            {
+                if (m_publicKey == null)
+                {
+                    m_publicKey = DerivePublicKey(this);
+                }
+                return m_publicKey;
+            }
         }
 
         /**
@@ -430,7 +441,9 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
         private byte[] CalcT(int r)
         {
-            var tDigest = LmsUtilities.GetDigest(this.sigParameters);
+            LMSigParameters sigParameters = SigParameters;
+
+            var tDigest = LmsUtilities.GetDigest(sigParameters);
 
             int h = sigParameters.H;
 
@@ -476,27 +489,35 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                 return true;
 
             return o is LmsPrivateKeyParameters that
-                && this.q == that.q
+                && this.GetIndex() == that.GetIndex()
                 && this.maxQ == that.maxQ
                 && Arrays.AreEqual(this.I, that.I)
                 && Objects.Equals(this.sigParameters, that.sigParameters)
                 && Objects.Equals(this.otsParameters, that.otsParameters)
-                && Arrays.AreEqual(this.masterSecret, that.masterSecret);
+                && Arrays.FixedTimeEquals(this.masterSecret, that.masterSecret);
         }
 
         public override int GetHashCode()
         {
-            int result = q;
-            result = 31 * result + maxQ;
-            result = 31 * result + Arrays.GetHashCode(I);
-            result = 31 * result + Objects.GetHashCode(sigParameters);
-            result = 31 * result + Objects.GetHashCode(otsParameters);
-            result = 31 * result + Arrays.GetHashCode(masterSecret);
-            return result;
+            //
+            // Deliberately not GetPublicKey().GetHashCode(): the root is only there if the tree cache
+            // holds it, so on a freshly generated or decoded key that builds the whole Merkle tree -
+            // 2^h LM-OTS public keys - from an implicit call no caller expects to cost anything. It is
+            // also independent of q, so a key's hash does not move as it signs, and of the master
+            // secret, so no function of the seed is handed out. Equal keys agree on every field used
+            // here, so the Equals() contract holds.
+            //
+            int hc = Objects.GetHashCode(sigParameters);
+            hc = 31 * hc + Objects.GetHashCode(otsParameters);
+            hc = 31 * hc + maxQ;
+            hc = 31 * hc + Arrays.GetHashCode(I);
+            return hc;
         }
 
         public override byte[] GetEncoded()
         {
+            int q = GetIndex();
+
             //
             // NB there is no formal specification for the encoding of private keys.
             // It is implementation dependent.
