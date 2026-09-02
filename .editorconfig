@@ -66,6 +66,21 @@ csharp_style_pattern_matching_over_is_with_cast_check = true:suggestion
 csharp_style_pattern_matching_over_as_with_null_check = true:suggestion
 csharp_style_inlined_variable_declaration = true:suggestion
 
+# Code-style (IDExxxx) rule severities
+# Suggestions we decline, mostly C# 8+ syntax that netstandard2.0/net461 (LangVersion 7.3)
+# cannot use. Add to this list as further rules prove noisy.
+
+# IDE0063: Use simple 'using' statement
+dotnet_diagnostic.IDE0063.severity = none
+# IDE0066: Convert switch statement to expression
+dotnet_diagnostic.IDE0066.severity = none
+# IDE0074: Use compound assignment
+dotnet_diagnostic.IDE0074.severity = none
+# IDE0083: Use pattern matching (not operator)
+dotnet_diagnostic.IDE0083.severity = none
+# IDE0090: Simplify 'new' expression
+dotnet_diagnostic.IDE0090.severity = none
+
 # Rider/ReSharper specific
 braces_for_for = required
 
