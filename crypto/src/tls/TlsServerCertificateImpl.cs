@@ -9,6 +9,9 @@ namespace Org.BouncyCastle.Tls
         private readonly CertificateStatus m_certificateStatus;
         private readonly CertificateStatus[] m_certificateStatuses;
 
+        /// <param name="certificate">
+        /// The Server Certificate message.
+        /// </param>
         /// <param name="certificateStatus">
         /// What <see cref="CertificateStatus"/> answers with: up to TLS 1.2 the "certificate_status" message as it
         /// arrived, which is the ocsp_multi list itself where the client asked with "status_request_v2"; from TLS 1.3

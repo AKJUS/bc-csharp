@@ -260,10 +260,9 @@ namespace Org.BouncyCastle.Tls
             return (i & 0xFFFFFFFFFFFFL) == i;
         }
 
-        public static bool IsValidUint64(long i)
-        {
-            return true;
-        }
+#pragma warning disable IDE0060 // Remove unused parameter
+        public static bool IsValidUint64(long i) => true;
+#pragma warning restore IDE0060
 
         public static bool IsSsl(TlsContext context)
         {
@@ -559,7 +558,7 @@ namespace Org.BouncyCastle.Tls
         public static byte[] DecodeOpaque8(byte[] buf, int minLength)
         {
             if (buf == null)
-                throw new ArgumentNullException("buf");
+                throw new ArgumentNullException(nameof(buf));
             if (buf.Length < 1)
                 throw new TlsFatalAlert(AlertDescription.decode_error);
 
@@ -575,7 +574,7 @@ namespace Org.BouncyCastle.Tls
         public static byte[] DecodeOpaque16(byte[] buf, int minLength)
         {
             if (buf == null)
-                throw new ArgumentNullException("buf");
+                throw new ArgumentNullException(nameof(buf));
             if (buf.Length < 2)
                 throw new TlsFatalAlert(AlertDescription.decode_error);
 
@@ -589,7 +588,7 @@ namespace Org.BouncyCastle.Tls
         public static short DecodeUint8(byte[] buf)
         {
             if (buf == null)
-                throw new ArgumentNullException("buf");
+                throw new ArgumentNullException(nameof(buf));
             if (buf.Length != 1)
                 throw new TlsFatalAlert(AlertDescription.decode_error);
 
@@ -599,7 +598,7 @@ namespace Org.BouncyCastle.Tls
         public static short[] DecodeUint8ArrayWithUint8Length(byte[] buf)
         {
             if (buf == null)
-                throw new ArgumentNullException("buf");
+                throw new ArgumentNullException(nameof(buf));
             if (buf.Length < 1)
                 throw new TlsFatalAlert(AlertDescription.decode_error);
 
@@ -618,7 +617,7 @@ namespace Org.BouncyCastle.Tls
         public static int DecodeUint16(byte[] buf)
         {
             if (buf == null)
-                throw new ArgumentNullException("buf");
+                throw new ArgumentNullException(nameof(buf));
             if (buf.Length != 2)
                 throw new TlsFatalAlert(AlertDescription.decode_error);
 
@@ -628,7 +627,7 @@ namespace Org.BouncyCastle.Tls
         public static int[] DecodeUint16ArrayWithUint8Length(byte[] buf)
         {
             if (buf == null)
-                throw new ArgumentNullException("buf");
+                throw new ArgumentNullException(nameof(buf));
 
             int length = ReadUint8(buf, 0);
             if (buf.Length != (length + 1) || (length & 1) != 0)
@@ -647,7 +646,7 @@ namespace Org.BouncyCastle.Tls
         public static long DecodeUint32(byte[] buf)
         {
             if (buf == null)
-                throw new ArgumentNullException("buf");
+                throw new ArgumentNullException(nameof(buf));
             if (buf.Length != 4)
                 throw new TlsFatalAlert(AlertDescription.decode_error);
 
@@ -1151,14 +1150,11 @@ namespace Org.BouncyCastle.Tls
             SignatureAndHashAlgorithm signatureAndHashAlgorithm = null;
             if (IsSignatureAlgorithmsExtensionAllowed(negotiatedVersion))
             {
-                signatureAndHashAlgorithm = credentialedSigner.SignatureAndHashAlgorithm;
-                if (signatureAndHashAlgorithm == null)
-                {
-                    /*
-                     * RFC 5246 4.7. digitally-signed element needs SignatureAndHashAlgorithm from TLS 1.2
-                     */
-                    throw new TlsFatalAlert(AlertDescription.internal_error);
-                }
+                /*
+                 * RFC 5246 4.7. digitally-signed element needs SignatureAndHashAlgorithm from TLS 1.2
+                 */
+                signatureAndHashAlgorithm = credentialedSigner.SignatureAndHashAlgorithm
+                    ?? throw new TlsFatalAlert(AlertDescription.internal_error);
             }
             return signatureAndHashAlgorithm;
         }
@@ -1351,7 +1347,7 @@ namespace Org.BouncyCastle.Tls
                 supportedSignatureAlgorithms.Count < 1 ||
                 supportedSignatureAlgorithms.Count >= (1 << 15))
             {
-                throw new ArgumentException("must have length from 1 to (2^15 - 1)", "supportedSignatureAlgorithms");
+                throw new ArgumentException("must have length from 1 to (2^15 - 1)", nameof(supportedSignatureAlgorithms));
             }
 
             // supported_signature_algorithms
@@ -1428,10 +1424,10 @@ namespace Org.BouncyCastle.Tls
             if (supportedSignatureAlgorithms == null || supportedSignatureAlgorithms.Count < 1
                 || supportedSignatureAlgorithms.Count >= (1 << 15))
             {
-                throw new ArgumentException("must have length from 1 to (2^15 - 1)", "supportedSignatureAlgorithms");
+                throw new ArgumentException("must have length from 1 to (2^15 - 1)", nameof(supportedSignatureAlgorithms));
             }
             if (signatureAlgorithm == null)
-                throw new ArgumentNullException("signatureAlgorithm");
+                throw new ArgumentNullException(nameof(signatureAlgorithm));
 
             if (signatureAlgorithm.Signature == SignatureAlgorithm.anonymous
                 || !ContainsSignatureAlgorithm(supportedSignatureAlgorithms, signatureAlgorithm))
@@ -1578,7 +1574,7 @@ namespace Org.BouncyCastle.Tls
                 return Arrays.Concatenate(cr, sr);
 
             if (!IsValidUint16(context.Length))
-                throw new ArgumentException("must have length less than 2^16 (or be null)", "context");
+                throw new ArgumentException("must have length less than 2^16 (or be null)", nameof(context));
 
             byte[] contextLength = new byte[2];
             WriteUint16(context.Length, contextLength, 0);
@@ -1803,10 +1799,7 @@ namespace Org.BouncyCastle.Tls
                 securityParameters.m_trafficSecretClient = Update13TrafficSecret(securityParameters, current);
             }
 
-            if (null != current)
-            {
-                current.Destroy();
-            }
+            current?.Destroy();
         }
 
         private static TlsSecret Update13TrafficSecret(SecurityParameters securityParameters, TlsSecret secret)
@@ -4598,9 +4591,9 @@ namespace Org.BouncyCastle.Tls
 
                 RequireDerEncoding(tlsFeaturesSeq, tlsFeatures);
 
-                foreach (DerInteger tlsFeature in tlsFeaturesSeq)
+                foreach (var tlsFeature in tlsFeaturesSeq)
                 {
-                    if (tlsFeature.TryGetIntValueExact(out int extensionType) && IsValidUint16(extensionType))
+                    if (((DerInteger)tlsFeature).TryGetIntValueExact(out int extensionType) && IsValidUint16(extensionType))
                     {
                         if (clientExtensions.ContainsKey(extensionType) && !serverExtensions.ContainsKey(extensionType))
                             throw new TlsFatalAlert(AlertDescription.certificate_unknown,
@@ -4746,9 +4739,8 @@ namespace Org.BouncyCastle.Tls
             if (IsNullOrEmpty(validClientCertificateTypes))
                 throw new TlsFatalAlert(AlertDescription.unexpected_message);
 
-            certificateRequest = NormalizeCertificateRequest(certificateRequest, validClientCertificateTypes);
-            if (certificateRequest == null)
-                throw new TlsFatalAlert(AlertDescription.illegal_parameter);
+            certificateRequest = NormalizeCertificateRequest(certificateRequest, validClientCertificateTypes)
+                ?? throw new TlsFatalAlert(AlertDescription.illegal_parameter);
 
             return certificateRequest;
         }
@@ -5301,7 +5293,8 @@ namespace Org.BouncyCastle.Tls
         /// client sent.
         /// </para>
         /// </remarks>
-        /// <param name="certificate">The Certificate message the server sent.</param>
+        /// <param name="context">The <see cref="TlsContext"/> of the current connection.</param>
+        /// <param name="certificate">The Server Certificate message.</param>
         /// <returns>
         /// One element per certificate of <paramref name="certificate"/>, null where unstapled.
         /// </returns>

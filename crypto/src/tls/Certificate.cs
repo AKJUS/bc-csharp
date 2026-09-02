@@ -17,8 +17,8 @@ namespace Org.BouncyCastle.Tls
     /// </remarks>
     public sealed class Certificate
     {
-        private static readonly TlsCertificate[] EmptyCerts = new TlsCertificate[0];
-        private static readonly CertificateEntry[] EmptyCertEntries = new CertificateEntry[0];
+        private static readonly TlsCertificate[] EmptyCerts = Array.Empty<TlsCertificate>();
+        private static readonly CertificateEntry[] EmptyCertEntries = Array.Empty<CertificateEntry>();
 
         public static readonly Certificate EmptyChain = new Certificate(EmptyCerts);
         public static readonly Certificate EmptyChainTls13 = new Certificate(TlsUtilities.EmptyBytes, EmptyCertEntries);
@@ -32,7 +32,7 @@ namespace Org.BouncyCastle.Tls
         private static CertificateEntry[] Convert(TlsCertificate[] certificateList)
         {
             if (TlsUtilities.IsNullOrContainsNull(certificateList))
-                throw new ArgumentException("cannot be null or contain any nulls", "certificateList");
+                throw new ArgumentException("cannot be null or contain any nulls", nameof(certificateList));
 
             int count = certificateList.Length;
             CertificateEntry[] result = new CertificateEntry[count];
@@ -61,9 +61,9 @@ namespace Org.BouncyCastle.Tls
         public Certificate(short certificateType, byte[] certificateRequestContext, CertificateEntry[] certificateEntryList)
         {
             if (null != certificateRequestContext && !TlsUtilities.IsValidUint8(certificateRequestContext.Length))
-                throw new ArgumentException("cannot be longer than 255", "certificateRequestContext");
+                throw new ArgumentException("cannot be longer than 255", nameof(certificateRequestContext));
             if (TlsUtilities.IsNullOrContainsNull(certificateEntryList))
-                throw new ArgumentException("cannot be null or contain any nulls", "certificateEntryList");
+                throw new ArgumentException("cannot be null or contain any nulls", nameof(certificateEntryList));
 
             m_certificateRequestContext = TlsUtilities.Clone(certificateRequestContext);
             m_certificateEntryList = certificateEntryList;
