@@ -15,6 +15,7 @@ namespace Org.BouncyCastle.Math.EC.Custom.Sec
         {
         }
 
+        [Obsolete("Will be removed")]
         protected override ECPoint Detach()
         {
             return new SecT113R2Point(null, AffineXCoord, AffineYCoord);

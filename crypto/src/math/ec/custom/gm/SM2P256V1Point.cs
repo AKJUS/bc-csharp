@@ -17,6 +17,7 @@ namespace Org.BouncyCastle.Math.EC.Custom.GM
         {
         }
 
+        [Obsolete("Will be removed")]
         protected override ECPoint Detach()
         {
             return new SM2P256V1Point(null, AffineXCoord, AffineYCoord);
