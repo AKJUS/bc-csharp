@@ -1,43 +1,38 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 using NUnit.Framework;
 
-using Org.BouncyCastle.Math;
-using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Asn1;
-using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Asn1.Pkcs;
+using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Utilities.Encoders;
-using Org.BouncyCastle.Utilities.Test;
+using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Math;
+using Org.BouncyCastle.OpenSsl;
 using Org.BouncyCastle.Security;
+using Org.BouncyCastle.Utilities.Encoders;
 
 namespace Org.BouncyCastle.Pkcs.Tests
 {
     [TestFixture]
     public class Pkcs10Test
-        : SimpleTest
     {
         private static readonly byte[] EmptyExtensionsReq = Base64.Decode(
-                "MIICVDCCATwCAQAwADCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAKy8\n" +
-                "4oC/QPFkRBE04LIA5njEulZx/EEh+J2spnThoRwk+oycYEVKp95NSfGTAoNjTwUv\n" +
-                "TdB9c1PCPE1DmgZIVLEVvouB7sZbMbLSI0d//oMO/Wr/CZmvjPGB8DID7RJs0eqO\n" +
-                "gLgSuyBVrwbcSKtxH4NrNDsS5IZXCcE3xzkxMDdz72m9jvIrl2ivi+YmJ7cJo3N+\n" +
-                "DBEqHZW28oytOmVo+8zhxvnHb9w26GJEOxN5zYbiIVW2vU9OfeF9te+Rhnks43Pk\n" +
-                "YDDP2U4hR7q0BYrdkeWdA1ReleYyn/haeAoIVLZMANIOXobiqASKqSusVq9tLD67\n" +
-                "7TAywl5AVq8GOBzlXZUCAwEAAaAPMA0GCSqGSIb3DQEJDjEAMA0GCSqGSIb3DQEB\n" +
-                "CwUAA4IBAQAXck62gJw1deVOLVFAwBNVNXgJarHtDg3pauHTHvN+pSbdOTe1aRzb\n" +
-                "Tt4/govtuuGZsGWlUqiglLpl6qeS7Pe9m+WJwhH5yXnJ3yvy2Lc/XkeVQ0kt8uFg\n" +
-                "30UyrgKng6LDgUGFjDSiFr3dK8S/iYpDu/qpl1bWJPWmfmnIXzZWWvBdUTKlfoD9\n" +
-                "/NLIWINEzHQIBXGy2uLhutYOvDq0WDGOgtdFC8my/QajaJh5lo6mM/PlmcYjK286\n" +
-                "EdGSIxdME7hoW/ljA5355S820QZDkYx1tI/Y/YaY5KVOntwfDQzQiwWZ2PtpTqSK\n" +
-                "KYe2Ujb362yaERCE13DJC4Us9j8OOXcW\n");
-
-        public override string Name
-        {
-			get { return "Pkcs10"; }
-        }
+            "MIICVDCCATwCAQAwADCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAKy8\n" +
+            "4oC/QPFkRBE04LIA5njEulZx/EEh+J2spnThoRwk+oycYEVKp95NSfGTAoNjTwUv\n" +
+            "TdB9c1PCPE1DmgZIVLEVvouB7sZbMbLSI0d//oMO/Wr/CZmvjPGB8DID7RJs0eqO\n" +
+            "gLgSuyBVrwbcSKtxH4NrNDsS5IZXCcE3xzkxMDdz72m9jvIrl2ivi+YmJ7cJo3N+\n" +
+            "DBEqHZW28oytOmVo+8zhxvnHb9w26GJEOxN5zYbiIVW2vU9OfeF9te+Rhnks43Pk\n" +
+            "YDDP2U4hR7q0BYrdkeWdA1ReleYyn/haeAoIVLZMANIOXobiqASKqSusVq9tLD67\n" +
+            "7TAywl5AVq8GOBzlXZUCAwEAAaAPMA0GCSqGSIb3DQEJDjEAMA0GCSqGSIb3DQEB\n" +
+            "CwUAA4IBAQAXck62gJw1deVOLVFAwBNVNXgJarHtDg3pauHTHvN+pSbdOTe1aRzb\n" +
+            "Tt4/govtuuGZsGWlUqiglLpl6qeS7Pe9m+WJwhH5yXnJ3yvy2Lc/XkeVQ0kt8uFg\n" +
+            "30UyrgKng6LDgUGFjDSiFr3dK8S/iYpDu/qpl1bWJPWmfmnIXzZWWvBdUTKlfoD9\n" +
+            "/NLIWINEzHQIBXGy2uLhutYOvDq0WDGOgtdFC8my/QajaJh5lo6mM/PlmcYjK286\n" +
+            "EdGSIxdME7hoW/ljA5355S820QZDkYx1tI/Y/YaY5KVOntwfDQzQiwWZ2PtpTqSK\n" +
+            "KYe2Ujb362yaERCE13DJC4Us9j8OOXcW\n");
 
         [Test]
         public void EmptyExtRequest()
@@ -47,7 +42,7 @@ namespace Org.BouncyCastle.Pkcs.Tests
             try
             {
                 req.GetRequestedExtensions();
-                Fail("no exception thrown");
+                Assert.Fail("no exception thrown");
             }
             catch (InvalidOperationException e)
             {
@@ -125,12 +120,12 @@ namespace Org.BouncyCastle.Pkcs.Tests
 
             if (!req2.Verify())
             {
-                Fail(sigName + ": Failed Verify check.");
+                Assert.Fail(sigName + ": Failed Verify check.");
             }
 
             if (!req2.GetPublicKey().Equals(req1.GetPublicKey()))
             {
-                Fail(keyName + ": Failed public key check.");
+                Assert.Fail(keyName + ": Failed public key check.");
             }
 
             //
@@ -147,20 +142,54 @@ namespace Org.BouncyCastle.Pkcs.Tests
             //
             if (!GeneralName.GetInstance(seq[0]).Equals(name1))
             {
-                Fail("expected name 1");
+                Assert.Fail("expected name 1");
             }
 
             if (!GeneralName.GetInstance(seq[1]).Equals(name2))
             {
-                Fail("expected name 2");
+                Assert.Fail("expected name 2");
             }
         }
 
-        public override void PerformTest()
+        /// <summary>
+        /// Reported as a possible issue with Chinese characters but the error was only calling ReadPemObject
+        /// </summary>
+        [Test]
+        public void GitHub_76()
+        {
+            string csrPem = "-----BEGIN CERTIFICATE REQUEST-----\n"
+                + "MIIBWDCB/wIBADCBnDELMAkGA1UEBhMCQ04xFTATBgNVBAgMDMOkwrjCrcOlwpvC\n"
+                + "vTEVMBMGA1UEBwwMw6TCuMKtw6XCm8K9MRUwEwYDVQQKDAzDpMK4wq3DpcKbwr0x\n"
+                + "FTATBgNVBAsMDMOkwrjCrcOlwpvCvTERMA8GA1UEAwwIdGVzdC5jb20xHjAcBgkq\n"
+                + "hkiG9w0BCQEWD2NtczFAd29zaWduLmNvbTBZMBMGByqGSM49AgEGCCqGSM49AwEH\n"
+                + "A0IABH5BKV5EksxpQSgs3N6KG58rUdFCEN00uIZLSfy7figQAYFE9oQhXC+5C59R\n"
+                + "8g81DOsi8zfhOYexhvjLT+OUdemgADAKBggqhkjOPQQDAgNIADBFAiEA2se8iUlw\n"
+                + "RwMAk/QCXEdCssnypRlxBOvFoetWwwl6a1MCID+OjMjdgSTk2VZidb7lpj15mLrE\n"
+                + "WMy7tfeaFSuZfKIR\n"
+                + "-----END CERTIFICATE REQUEST-----\n";
+
+            Pkcs10CertificationRequest request;
+            using (var pemReader = new PemReader(new StringReader(csrPem)))
+            {
+                // The original report used ReadPemObject here, which presumably was the actual error
+                request = (Pkcs10CertificationRequest)pemReader.ReadObject();
+            }
+
+            Assert.True(request.Verify());
+
+            var subject = request.GetCertificationRequestInfo().Subject.ToString();
+            Assert.NotNull(subject);
+
+            var publicKey = request.GetPublicKey();
+            Assert.That(publicKey is ECPublicKeyParameters);
+        }
+
+        [Test]
+        public void Basic()
         {
             IAsymmetricCipherKeyPairGenerator pGen = GeneratorUtilities.GetKeyPairGenerator("RSA");
             RsaKeyGenerationParameters genParam = new RsaKeyGenerationParameters(
-				BigInteger.ValueOf(0x10001), new SecureRandom(), 512, 25);
+                BigInteger.ValueOf(0x10001), new SecureRandom(), 512, 25);
 
             pGen.Init(genParam);
 
@@ -177,33 +206,25 @@ namespace Org.BouncyCastle.Pkcs.Tests
             X509Name subject = new X509Name(new List<DerObjectIdentifier>(attrs.Keys), attrs);
 
             Pkcs10CertificationRequest req1 = new Pkcs10CertificationRequest(
-				"SHA1withRSA",
-				subject,
-				pair.Public,
-				null,
-				pair.Private);
+                "SHA1withRSA",
+                subject,
+                pair.Public,
+                null,
+                pair.Private);
 
-			byte[] bytes = req1.GetEncoded();
+            byte[] bytes = req1.GetEncoded();
 
-			Pkcs10CertificationRequest req2 = new Pkcs10CertificationRequest(bytes);
+            Pkcs10CertificationRequest req2 = new Pkcs10CertificationRequest(bytes);
 
-			if (!req2.Verify())
+            if (!req2.Verify())
             {
-                Fail("Failed verify check.");
+                Assert.Fail("Failed verify check.");
             }
 
             if (!req2.GetPublicKey().Equals(req1.GetPublicKey()))
             {
-                Fail("Failed public key check.");
+                Assert.Fail("Failed public key check.");
             }
-        }
-
-		[Test]
-        public void TestFunction()
-        {
-            string resultText = Perform().ToString();
-
-			Assert.AreEqual(Name + ": Okay", resultText);
         }
     }
 }
