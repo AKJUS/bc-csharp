@@ -1,11 +1,9 @@
-﻿using System;
-using System.IO;
+﻿using System.IO;
 
 using NUnit.Framework;
 
 using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Asn1.X509;
-using Org.BouncyCastle.Pkcs;
 using Org.BouncyCastle.Utilities.IO.Pem;
 
 namespace Org.BouncyCastle.Crypto.IO.Tests
@@ -15,7 +13,7 @@ namespace Org.BouncyCastle.Crypto.IO.Tests
     {
 
         [Test]
-        public void TestMalformedInput()
+        public void MalformedInput()
         {
             string raw = "-----BEGIN CERTIFICATE REQUEST----- MIIBkTCB+wIBADAUMRIwEAYDVQQDDAlUZXN0MlNBTnMwgZ8wDQYJKoZIhvcNAQEB BQADgY0AMIGJAoGBAPPPH7W8LqBMCwSu/MsmCeSCfBzMEp4k+aZmeKw8EQD1R3FK WtPy/LcaUyQhyIeNPFAH8JEz0dJRJjleFL8G5pv7c2YXjBmIfbF/W2eETBIohMDP pWOqKYiT1mqzw25rP1VuXGXaSfN22RReomUd9O2GuEkaqz5x5iTRD6aLmDoJAgMB AAGgPjA8BgkqhkiG9w0BCQ4xLzAtMCsGA1UdEQQkMCKCD3NhbjEudGVzdC5sb2Nh bIIPc2FuMi50ZXN0LmxvY2FsMA0GCSqGSIb3DQEBCwUAA4GBAOacp+9s7/jpmSTA ORvx4nsDwBsY4VLeuPUc2gYmHqfVgrCCSHKPQtQge0P5atudbo+q8Fn+/5JnJR6/ JaooICY3M+/QVrvzvV30i5W8aEIERfXsEIcFyVxv24p6SbrGAcSjwpqvgAf0z82F D3f1qdFATb9HAFsuD/J0HexTFDvB -----END CERTIFICATE REQUEST-----";
 
@@ -33,7 +31,7 @@ namespace Org.BouncyCastle.Crypto.IO.Tests
         }
 
         [Test]
-        public void TestSaneInput()
+        public void SaneInput()
         {
             string test = "Certificate:\n" +
                 "    Data:\n" +
@@ -90,7 +88,7 @@ namespace Org.BouncyCastle.Crypto.IO.Tests
         }
 
         [Test]
-        public void TestWithHeaders()
+        public void WithHeaders()
         {
             string hdr = "Proc-Type: 4,CRL\n";
             string hdr2 = "CRL: CRL Header\n";
@@ -120,26 +118,24 @@ namespace Org.BouncyCastle.Crypto.IO.Tests
             Assert.AreEqual("CN=estExampleCA", cert.Issuer.ToString());
 
             int t = 0;
-            foreach(string[] items in new string[][] { 
-                new string[] { "Proc-Type", "4,CRL" },
-                new string[] { "CRL", "CRL Header" },
-                new string[] { "Originator-Certificate", "originator certificate" },
-                new string[] { "CRL", "crl header" },
-                new string[] { "Originator-Certificate", "next originator certificate" },
-
+            foreach (string[] items in new string[][]{
+                new string[]{ "Proc-Type", "4,CRL" },
+                new string[]{ "CRL", "CRL Header" },
+                new string[]{ "Originator-Certificate", "originator certificate" },
+                new string[]{ "CRL", "crl header" },
+                new string[]{ "Originator-Certificate", "next originator certificate" },
             })
             {
                 Assert.AreEqual(items[0], item.Headers[t].Name);
                 Assert.AreEqual(items[1], item.Headers[t].Value);
                 t++;
             }
-
         }
 
         [Test]
-        public void TestNoWhiteSpace()
+        public void NoWhiteSpace()
         {
-            string test = "-----BEGIN CERTIFICATE-----" + 
+            string test = "-----BEGIN CERTIFICATE-----" +
                 "MIIBezCCASOgAwIBAgICA2EwCQYHKoZIzj0EATAXMRUwEwYDVQQDEwxlc3RFeGFt" +
                 "cGxlQ0EwHhcNMTQwOTI5MTI0MTMxWhcNMjIxMjE2MTI0MTMxWjAWMRQwEgYDVQQD" +
                 "DAsqLmNpc2NvLmNvbTCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEAtwjmGPIy" +
@@ -156,6 +152,64 @@ namespace Org.BouncyCastle.Crypto.IO.Tests
                 Assert.AreEqual("CERTIFICATE", item.Type);
                 X509CertificateStructure cert = X509CertificateStructure.GetInstance(Asn1Sequence.GetInstance(item.Content));
                 Assert.AreEqual("CN=estExampleCA", cert.Issuer.ToString());
+            }
+        }
+
+        [Test]
+        public void ExplanatoryTextAroundObjects()
+        {
+            // GitHub issue #243: tools such as 'openssl pkcs7 -print_certs' or 's_client -showcerts' surround
+            // each certificate with explanatory text (RFC 7468 section 5.2). It must be ignored before the first
+            // BEGIN line, between consecutive objects, and after the final END line.
+            string pem = "-----BEGIN CERTIFICATE-----\n" +
+                "MIIBezCCASOgAwIBAgICA2EwCQYHKoZIzj0EATAXMRUwEwYDVQQDEwxlc3RFeGFt\n" +
+                "cGxlQ0EwHhcNMTQwOTI5MTI0MTMxWhcNMjIxMjE2MTI0MTMxWjAWMRQwEgYDVQQD\n" +
+                "DAsqLmNpc2NvLmNvbTCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEAtwjmGPIy\n" +
+                "1wdES/OxgwFZ+LzsJnGSmlNw8sC+KtYmb0URhtfuN53TLyKyi5vFlgA2c5fDTPJ6\n" +
+                "CyzgzNnw7LobdYxmsYYQ/b7fa2ecDmsqDtCAqNx61N9ueSinYBoRt65AlLu0Ee0b\n" +
+                "b6eRrjPsv5ww89yRLLQ+jMm98dGq9sIdas0CAwEAAaMaMBgwCQYDVR0TBAIwADAL\n" +
+                "BgNVHQ8EBAMCBeAwCQYHKoZIzj0EAQNHADBEAiB2TzpstJnLHjf0DW7hdEuZu/XE\n" +
+                "tj3BYd+M1x+f59Nk1gIgZDiPbzI3K33PKJPl5udwxakSBLBLpSl7I9+F8hhEi9I=\n" +
+                "-----END CERTIFICATE-----\n";
+
+            string test =
+                "subject=CN = *.cisco.com\n" +
+                "issuer=CN = estExampleCA\n" +
+                pem +
+                "\n" +
+                // Dashes in the explanatory text must not be mistaken for a boundary.
+                "subject=CN = est-Example-CA, O = Crypto-Workshop\n" +
+                "issuer=CN = estExampleCA\n" +
+                pem +
+                "trailing text after the last END line\n";
+
+            using (var pemReader = new PemReader(new StringReader(test)))
+            {
+                for (int i = 0; i < 2; ++i)
+                {
+                    PemObject item = pemReader.ReadPemObject();
+                    Assert.NotNull(item, "object " + i);
+                    Assert.AreEqual("CERTIFICATE", item.Type);
+                    Assert.AreEqual(0, item.Headers.Count);
+
+                    var cert = X509CertificateStructure.GetInstance(item.Content);
+                    Assert.AreEqual("CN=estExampleCA", cert.Issuer.ToString());
+                }
+
+                Assert.IsNull(pemReader.ReadPemObject());
+            }
+
+            // Same input via the OpenSSL-level reader, as used in the original report.
+            using (var pemReader = new OpenSsl.PemReader(new StringReader(test)))
+            {
+                for (int i = 0; i < 2; ++i)
+                {
+                    var cert = pemReader.ReadObject() as X509.X509Certificate;
+                    Assert.NotNull(cert, "object " + i);
+                    Assert.AreEqual("CN=*.cisco.com", cert.SubjectDN.ToString());
+                }
+
+                Assert.IsNull(pemReader.ReadObject());
             }
         }
     }
