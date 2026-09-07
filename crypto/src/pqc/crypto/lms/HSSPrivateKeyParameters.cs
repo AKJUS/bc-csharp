@@ -304,6 +304,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             }
         }
 
+        // TODO[api] This is not public in bc-java (promoted API)
         public IList<LmsPrivateKeyParameters> GetKeys()
         {
             lock (this) return CollectionUtilities.ReadOnly(m_keys);
@@ -353,10 +354,12 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
             if (!rootQMatch)
             {
-                keys[0] = Lms.GenerateKeys(
-                    originalRootKey.SigParameters,
-                    originalRootKey.OtsParameters,
-                    (int)qTreePath[0], originalRootKey.GetI(), originalRootKey.GetMasterSecret());
+                //
+                // Only the position moves - the root's identifier, seed and parameter sets are its own
+                // and cannot have changed - so this is the same tree at a different one-time key, and
+                // the repositioned key keeps the tree the root has already built.
+                //
+                keys[0] = originalRootKey.RepositionTo((int)qTreePath[0]);
                 changed = true;
             }
 
@@ -420,13 +423,12 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                 else if (!lmsQMatch)
                 {
                     //
-                    // Q is different so we can generate a new private key but it will have the same public
-                    // key so we do not need to sign it again.
+                    // Q is different, but seedEquals says the identifier and seed are not, so this is
+                    // the same tree at a different one-time key: reposition within it rather than
+                    // rebuild it. The public key is unchanged either way, so the chaining signature
+                    // above it still stands and does not need making again.
                     //
-                    keys[i] = Lms.GenerateKeys(
-                        originalKeys[i].SigParameters,
-                        originalKeys[i].OtsParameters,
-                        (int)qTreePath[i], childI, childSeed);
+                    keys[i] = keys[i].RepositionTo((int)qTreePath[i]);
                     changed = true;
                 }
             }

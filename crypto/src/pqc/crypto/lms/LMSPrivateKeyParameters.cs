@@ -88,6 +88,11 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
         }
 
         private LmsPrivateKeyParameters(LmsPrivateKeyParameters parent, int q, int maxQ)
+            : this(parent, q, maxQ, 1 << parent.sigParameters.H)
+        {
+        }
+
+        private LmsPrivateKeyParameters(LmsPrivateKeyParameters parent, int q, int maxQ, int maxCacheR)
             : base(true)
         {
             this.sigParameters = parent.sigParameters;
@@ -96,9 +101,30 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             this.I = parent.I;
             this.maxQ = maxQ;
             this.masterSecret = parent.masterSecret;
-            this.maxCacheR = 1 << sigParameters.H;
+            this.maxCacheR = maxCacheR;
             this.tCache = parent.tCache;
             this.m_publicKey = parent.m_publicKey;
+        }
+
+        /// <summary>
+        /// This key's tree at a different one-time key. A Merkle tree is a function of the key identifier, the master
+        /// secret and the parameter sets and not of q, so a key repositioned within its own tree has exactly the nodes
+        /// this one has: it shares the node cache and the public key rather than rebuilding a tree that has already
+        /// been built. HSS repositioning uses this in place of regenerating a component key whose identifier and seed
+        /// have not changed, which otherwise costs about as much as key generation (github bc-java #2414).
+        /// </summary>
+        /// <param name="q">The one-time key to position at.</param>
+        internal LmsPrivateKeyParameters RepositionTo(int q)
+        {
+            lock (this)
+            {
+                int twoToH = 1 << sigParameters.H;
+
+                if (q < 0 || q > twoToH)
+                    throw new ArgumentException($"LMS private key q out of range: q={q} 2^h={twoToH}", nameof(q));
+
+                return new LmsPrivateKeyParameters(this, q, twoToH, maxCacheR);
+            }
         }
 
         public static LmsPrivateKeyParameters GetInstance(byte[] privEnc, byte[] pubEnc) =>

@@ -1153,6 +1153,56 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
             return (int)Pack_BE_To_UInt32(hssSignature, hssSignature.Length - h * m - 4);
         }
 
+        // TODO[lms] GetSig, PeekRoot
+#if false
+        /// <summary>
+        /// The lower half of a hierarchy repositions within its own tree - identifier and seed unchanged, only q moves
+        /// - so ResetKeyToIndex must share the tree the component key already has rather than regenerate one identical
+        /// to it.
+        /// </summary>
+        [Test]
+        public void BottomLevelRepositionKeepsTheTree()
+        {
+            LMSigParameters sigParams = LMSigParameters.lms_sha256_n32_h5;
+            LMOtsParameters otsParams = LMOtsParameters.sha256_n32_w2;
+
+            HssKeyPairGenerator gen = new HssKeyPairGenerator();
+            gen.Init(new HssKeyGenerationParameters(
+                new LmsParameters[]{new LmsParameters(sigParams, otsParams), new LmsParameters(sigParams, otsParams) },
+                new SecureRandom()));
+            HssPrivateKeyParameters hss = (HssPrivateKeyParameters)gen.GenerateKeyPair().Private;
+
+            HssPublicKeyParameters pubKey = hss.GetPublicKey();
+            List<LmsPrivateKeyParameters> keys = new List<LmsPrivateKeyParameters>(hss.GetKeys());
+            List<LmsSignature> sigs = new List<LmsSignature>(hss.GetSig());
+            byte[] bottomT1 = keys[1].GetPublicKey().GetT1();
+
+            // an index whose bottom level q moves while the root's does not: the branch where the
+            // derived identifier and seed match and only the position is wrong
+            HssPrivateKeyParameters moved = new HssPrivateKeyParameters(2, keys, sigs, 3, 1L << (2 * sigParams.H));
+
+            Assert.AreSame(keys[0], moved.GetKeys()[0], "the reset replaced the root key");
+            Assert.AreNotSame(keys[1], moved.GetKeys()[1], "the reset failed to reposition the bottom key");
+            Assert.AreEqual(3, moved.GetKeys()[1].GetIndex());
+            Assert.NotNull(moved.GetKeys()[1].PeekRootT(), "repositioning discarded the tree cache");
+            Assert.True(Arrays.AreEqual(bottomT1, moved.GetKeys()[1].GetPublicKey().GetT1()),
+                "repositioning changed the bottom public key");
+            Assert.AreSame(sigs[0], moved.GetSig()[0], "repositioning re-signed a public key that had not changed");
+            Assert.True(Arrays.AreEqual(pubKey.GetEncoded(), moved.GetPublicKey().GetEncoded()),
+                "repositioning changed the HSS public key");
+
+            byte[] msg = Hex.Decode("6162636465");
+            HssSigner signer = new HssSigner();
+            signer.Init(true, moved);
+            byte[] sig = signer.GenerateSignature(msg);
+
+            HssSigner verifier = new HssSigner();
+            verifier.Init(false, pubKey);
+            Assert.True(verifier.VerifySignature(msg, sig),
+                "repositioned key produced a signature that does not verify");
+        }
+#endif
+
         /// <summary>
         /// Wrapping an LMS key as a single level HSS key keeps the key it was given, rather than regenerating it.
         /// ResetKeyToIndex compares each level's q against the value derived from the HSS index, and an intermediate
@@ -1213,6 +1263,18 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
             // TODO[lms] GetRootKey
             //Assert.AreEqual(1, moved.GetRootKey().GetIndex());
             Assert.AreEqual(1, moved.GetKeys()[0].GetIndex());
+
+            // the Merkle tree is a function of I, the seed and the parameters and not of q, so the
+            // repositioned key is entitled to the tree it was built from rather than a rebuild costing
+            // about as much as generating the key. peekRootT is asked before getPublicKey below, which
+            // would prime the cache itself and hide the difference.
+            // TODO[lms] GetRootKey, PeekRootT
+            //Assert.NotNull(moved.GetRootKey().PeekRootT(), "repositioning discarded the tree cache");
+            // TODO[lms] GetRootKey
+            //Assert.AreEqual(1 << sigParams.H, moved.GetRootKey().IndexLimit,
+            //    "repositioning narrowed the range of the key");
+            Assert.AreEqual(1 << sigParams.H, moved.GetKeys()[0].IndexLimit,
+                "repositioning narrowed the range of the key");
 
             Assert.That(Arrays.AreEqual(rootT1, moved.GetPublicKey().LmsPublicKey.GetT1()),
                 "repositioning changed the public key");
