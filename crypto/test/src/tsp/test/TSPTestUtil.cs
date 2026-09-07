@@ -29,6 +29,7 @@ namespace Org.BouncyCastle.Tsp.Tests
         public static readonly SecureRandom Random = new SecureRandom();
 
         internal static IAsymmetricCipherKeyPairGenerator kpg;
+        internal static IAsymmetricCipherKeyPairGenerator dsaKpg;
         internal static CipherKeyGenerator desede128kg;
         internal static CipherKeyGenerator desede192kg;
         internal static CipherKeyGenerator rc240kg;
@@ -86,6 +87,13 @@ namespace Org.BouncyCastle.Tsp.Tests
         {
             kpg = GeneratorUtilities.GetKeyPairGenerator("RSA");
             kpg.Init(new RsaKeyGenerationParameters(BigInteger.ValueOf(0x10001), Random, 1024, 25));
+
+            DsaParameters dsaSpec = new DsaParameters(
+                new BigInteger("7434410770759874867539421675728577177024889699586189000788950934679315164676852047058354758883833299702695428196962057871264685291775577130504050839126673"),
+                new BigInteger("1138656671590261728308283492178581223478058193247"),
+                new BigInteger("4182906737723181805517018315469082619513954319976782448649747742951189003482834321192692620856488639629011570381138542789803819092529658402611668375788410"));
+            dsaKpg = GeneratorUtilities.GetKeyPairGenerator("DSA");
+            dsaKpg.Init(new DsaKeyGenerationParameters(Random, dsaSpec));
 
             desede128kg = GeneratorUtilities.GetKeyGenerator("DESEDE");
             desede128kg.Init(new KeyGenerationParameters(Random, 112));
@@ -275,6 +283,8 @@ namespace Org.BouncyCastle.Tsp.Tests
         }
 
         public static AsymmetricCipherKeyPair MakeKeyPair() => kpg.GenerateKeyPair();
+
+        public static AsymmetricCipherKeyPair MakeDsaKeyPair() => dsaKpg.GenerateKeyPair();
 
         public static KeyParameter MakeDesede128Key() => new DesEdeParameters(desede128kg.GenerateKey());
 

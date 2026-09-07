@@ -83,6 +83,25 @@ namespace Org.BouncyCastle.Tsp
         {
         }
 
+        /// <exception cref="TspException">if the response is malformed.</exception>
+        /// <exception cref="IOException">if the stream doesn't represent an ASN.1 encoding.</exception>
+        internal TimeStampResponse(DLSequence dlSequence)
+        {
+            try
+            {
+                m_resp = TimeStampResp.GetInstance(dlSequence);
+                m_timeStampToken = new TimeStampToken(Asn1.Cms.ContentInfo.GetInstance(dlSequence[1]));
+            }
+            catch (IOException)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                throw new TspException("malformed timestamp response: " + e, e);
+            }
+        }
+
         public PkiStatusInfo StatusInfo => m_resp.Status;
 
         public int Status => StatusInfo.StatusObject.IntValueExact;

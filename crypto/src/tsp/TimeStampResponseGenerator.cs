@@ -151,54 +151,46 @@ namespace Org.BouncyCastle.Tsp
             }
         }
 
+        // TODO[api] Remove '?' from genTime?
         public TimeStampResponse GenerateGrantedResponse(TimeStampRequest request, BigInteger serialNumber,
             DateTime? genTime, string statusString, X509Extensions additionalExtensions)
         {
-            TimeStampResp resp;
+            if (genTime == null)
+                throw new TspValidationException("The time source is not available.",
+                    PkiFailureInfo.TimeNotAvailable);
 
-            try
+            request.Validate(acceptedAlgorithms, acceptedPolicies, acceptedExtensions);
+
+            this.status = PkiStatus.Granted;
+            this.statusStrings = new Asn1EncodableVector();
+
+            if (statusString != null)
             {
-                if (genTime == null)
-                    throw new TspValidationException("The time source is not available.",
-                        PkiFailureInfo.TimeNotAvailable);
-
-                request.Validate(acceptedAlgorithms, acceptedPolicies, acceptedExtensions);
-
-                this.status = PkiStatus.Granted;
                 this.AddStatusString(statusString);
-
-                PkiStatusInfo pkiStatusInfo = GetPkiStatusInfo();
-
-                ContentInfo tstTokenContentInfo;
-                try
-                {
-                    TimeStampToken token = tokenGenerator.Generate(request, serialNumber, genTime.Value,
-                        additionalExtensions);
-
-                    tstTokenContentInfo = token.ToCmsSignedData().ContentInfo;
-                }
-                catch (IOException e)
-                {
-                    throw new TspException("Timestamp token received cannot be converted to ContentInfo", e);
-                }
-
-                resp = new TimeStampResp(pkiStatusInfo, tstTokenContentInfo);
             }
-            catch (TspValidationException e)
+
+            PkiStatusInfo pkiStatusInfo = GetPkiStatusInfo();
+
+            ContentInfo tstTokenContentInfo;
+            try
             {
-                status = PkiStatus.Rejection;
+                TimeStampToken token = tokenGenerator.Generate(request, serialNumber, genTime.Value,
+                    additionalExtensions);
 
-                this.SetFailInfoField(e.FailureCode);
-                this.AddStatusString(e.Message);
-
-                PkiStatusInfo pkiStatusInfo = GetPkiStatusInfo();
-
-                resp = new TimeStampResp(pkiStatusInfo, null);
+                tstTokenContentInfo = token.ToCmsSignedData().ContentInfo;
+            }
+            catch (TspException)
+            {
+                throw;
+            }
+            catch (IOException e)
+            {
+                throw new TspException("Timestamp token received cannot be converted to ContentInfo", e);
             }
 
             try
             {
-                return new TimeStampResponse(resp);
+                return new TimeStampResponse(new DLSequence(pkiStatusInfo.ToAsn1Object(), tstTokenContentInfo.ToAsn1Object()));
             }
             catch (IOException e)
             {
@@ -216,6 +208,24 @@ namespace Org.BouncyCastle.Tsp
         }
 
         /**
+         * Generate a generic rejection response based on a TSPValidationException or
+         * an Exception. Exceptions which are not an instance of TSPValidationException
+         * will be treated as systemFailure. The return value of exception.getMessage() will
+         * be used as the status string for the response.
+         *
+         * @param exception the exception thrown on validating the request.
+         * @return a TimeStampResponse.
+         * @throws TSPException if a failure response cannot be generated.
+         */
+        public TimeStampResponse GenerateRejectedResponse(Exception exception)
+        {
+            if (exception is TspValidationException tspValidationException)
+                return GenerateFailResponse(PkiStatus.Rejection, tspValidationException.FailureCode, exception.Message);
+
+            return GenerateFailResponse(PkiStatus.Rejection, PkiFailureInfo.SystemFailure, exception.Message);
+        }
+
+        /**
          * Generate a TimeStampResponse with chosen status and FailInfoField.
          *
          * @param status the PKIStatus to set.
@@ -227,6 +237,7 @@ namespace Org.BouncyCastle.Tsp
         public TimeStampResponse GenerateFailResponse(PkiStatus status, int failInfoField, string statusString)
         {
             this.status = status;
+            this.statusStrings = new Asn1EncodableVector();
 
             this.SetFailInfoField(failInfoField);
 

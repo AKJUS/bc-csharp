@@ -17,6 +17,7 @@ using Org.BouncyCastle.Crypto.Operators;
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.Collections;
+using Org.BouncyCastle.Utilities.Encoders;
 using Org.BouncyCastle.Utilities.Test;
 using Org.BouncyCastle.X509;
 
@@ -46,6 +47,12 @@ namespace Org.BouncyCastle.Tsp.Tests
             var certs = CollectionUtilities.CreateStore(certList);
 
             BasicTest(origKP.Private, cert, certs);
+
+            TimeStampRequest tReq = new TimeStampRequest(
+                Base64.Decode("MDcCAQEwLzALBglghkgBZQMEAgEEIJg0h23PsFyxZ6XCSVPrpYxKyJsa31fyjy+dCa8QfujwAQH/"));
+
+            Assert.True(tReq.CertReq);
+
             ResolutionTest(origKP.Private, cert, certs, Resolution.R_SECONDS, "19700101000009Z");
             ResolutionTest(origKP.Private, cert, certs, Resolution.R_TENTHS_OF_SECONDS, "19700101000009.9Z");
             ResolutionTest(origKP.Private, cert, certs, Resolution.R_HUNDREDTHS_OF_SECONDS, "19700101000009.99Z");
@@ -65,6 +72,80 @@ namespace Org.BouncyCastle.Tsp.Tests
             TestNoNonse(origKP.Private, cert, certs);
             ExtensionTest(origKP.Private, cert, certs);
             AdditionalExtensionTest(origKP.Private, cert, certs);
+        }
+
+        [Test]
+        public void TestCertOrdering()
+        {
+            string _origDN = "O=Bouncy Castle, C=AU";
+            AsymmetricCipherKeyPair _origKP = TspTestUtil.MakeKeyPair();
+            X509Certificate _origCert = TspTestUtil.MakeCertificate(_origKP, _origDN, _origKP, _origDN);
+
+            String _signDN = "CN=Bob, OU=Sales, O=Bouncy Castle, C=AU";
+            AsymmetricCipherKeyPair _signKP = TspTestUtil.MakeKeyPair();
+            X509Certificate _signCert = TspTestUtil.MakeCertificate(_signKP, _signDN, _origKP, _origDN);
+
+            AsymmetricCipherKeyPair _signDsaKP = TspTestUtil.MakeDsaKeyPair();
+            X509Certificate _signDsaCert = TspTestUtil.MakeCertificate(_signDsaKP, _signDN, _origKP, _origDN);
+
+            var certList = new List<X509Certificate>();
+            certList.Add(_origCert);
+            certList.Add(_signDsaCert);
+            certList.Add(_signCert);
+
+            var certs = CollectionUtilities.CreateStore(certList);
+
+            TimeStampTokenGenerator tsTokenGen = new TimeStampTokenGenerator(_signKP.Private, _signCert,
+                TspAlgorithms.Sha1, "1.2");
+
+            tsTokenGen.SetCertificates(certs);
+
+            TimeStampRequestGenerator reqGen = new TimeStampRequestGenerator();
+
+            reqGen.SetCertReq(true);
+
+            TimeStampRequest request = reqGen.Generate(TspAlgorithms.Sha1, new byte[20], BigInteger.ValueOf(100));
+
+            TimeStampResponseGenerator tsRespGen = new TimeStampResponseGenerator(tsTokenGen, TspAlgorithms.Allowed);
+
+            TimeStampResponse initResp = tsRespGen.GenerateGrantedResponse(request, new BigInteger("23"),
+                DateTime.UtcNow, null, null);
+
+            // original CMS SignedData object
+            CmsSignedData sd = initResp.TimeStampToken.ToCmsSignedData();
+
+            certs = sd.GetCertificates();
+            var matches = new List<X509Certificate>(certs.EnumerateMatches(null));
+            Assert.AreEqual(3, matches.Count);
+            Assert.AreEqual(matches[0], _origCert);
+            Assert.AreEqual(matches[1], _signDsaCert);
+            Assert.AreEqual(matches[2], _signCert);
+
+            // definite-length
+            TimeStampResponse dlResp = new TimeStampResponse(initResp.GetEncoded(Asn1Encodable.DL));
+
+            sd = dlResp.TimeStampToken.ToCmsSignedData();
+
+            certs = sd.GetCertificates();
+            matches = new List<X509Certificate>(certs.EnumerateMatches(null));
+
+            Assert.AreEqual(3, matches.Count);
+            Assert.AreEqual(matches[0], _origCert);
+            Assert.AreEqual(matches[1], _signDsaCert);
+            Assert.AreEqual(matches[2], _signCert);
+
+            // convert to DER - the default encoding
+            TimeStampResponse derResp = new TimeStampResponse(initResp.GetEncoded());
+
+            sd = derResp.TimeStampToken.ToCmsSignedData();
+
+            certs = sd.GetCertificates();
+            matches = new List<X509Certificate>(certs.EnumerateMatches(null));
+
+            Assert.AreEqual(3, matches.Count);
+            Assert.AreEqual(matches[0], _origCert);
+            Assert.AreEqual(matches[1], _signCert);
+            Assert.AreEqual(matches[2], _signDsaCert);
         }
 
         private void AdditionalExtensionTest(AsymmetricKeyParameter privateKey, X509Certificate cert,
