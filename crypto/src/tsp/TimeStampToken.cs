@@ -36,6 +36,7 @@ namespace Org.BouncyCastle.Tsp
             var signers = m_tsToken.GetSignerInfos().GetSigners();
             if (signers.Count != 1)
             {
+                // TODO[api] TspValidationException
                 throw new ArgumentException("Time-stamp token signed by "
                     + signers.Count
                     + " signers, but it must contain just the TSA signature.");
@@ -48,17 +49,37 @@ namespace Org.BouncyCastle.Tsp
                 var tstInfo = TstInfo.GetInstance(CmsUtilities.GetByteArray(m_tsToken.SignedContent));
                 m_tstInfo = new TimeStampTokenInfo(tstInfo);
 
-                if (m_tsaSignerInfo.SignedAttributes.TryGetFirst(PkcsObjectIdentifiers.IdAASigningCertificateV2,
-                    out var attrV2))
+                var signedAttr = m_tsaSignerInfo.SignedAttributes;
+                if (signedAttr == null)
+                    throw new TspValidationException("no signing certificate attribute found, time stamp invalid.");
+
+                if (signedAttr.TryGetFirst(PkcsObjectIdentifiers.IdAASigningCertificateV2, out var attrV2))
                 {
-                    SigningCertificateV2 signCertV2 = SigningCertificateV2.GetInstance(attrV2.AttrValues[0]);
-                    m_certID = EssCertIDv2.GetInstance(signCertV2.GetCerts()[0]);
+                    var attrV2Values = attrV2.AttrValues;
+                    if (attrV2Values.Count < 1)
+                        throw new TspException("signing certificate v2 attribute MUST contain at least one AttributeValue");
+
+                    SigningCertificateV2 signCertV2 = SigningCertificateV2.GetInstance(attrV2Values[0]);
+
+                    var signCertV2Certs = signCertV2.GetCerts();
+                    if (signCertV2Certs.Length < 1)
+                        throw new TspException("signing certificate v2 attribute MUST contain at least one ESSCertIDv2");
+
+                    m_certID = EssCertIDv2.GetInstance(signCertV2Certs[0]);
                 }
-                else if (m_tsaSignerInfo.SignedAttributes.TryGetFirst(PkcsObjectIdentifiers.IdAASigningCertificate,
-                    out var attr))
+                else if (signedAttr.TryGetFirst(PkcsObjectIdentifiers.IdAASigningCertificate, out var attr))
                 {
-                    SigningCertificate signCert = SigningCertificate.GetInstance(attr.AttrValues[0]);
-                    m_certID = EssCertIDv2.From(EssCertID.GetInstance(signCert.GetCerts()[0]));
+                    var attrValues = attr.AttrValues;
+                    if (attrValues.Count < 1)
+                        throw new TspException("signing certificate attribute MUST contain at least one AttributeValue");
+
+                    SigningCertificate signCert = SigningCertificate.GetInstance(attrValues[0]);
+
+                    var signCertCerts = signCert.GetCerts();
+                    if (signCertCerts.Length < 1)
+                        throw new TspException("signing certificate attribute MUST contain at least one ESSCertID");
+
+                    m_certID = EssCertIDv2.From(EssCertID.GetInstance(signCertCerts[0]));
                 }
                 else
                 {
@@ -68,6 +89,10 @@ namespace Org.BouncyCastle.Tsp
             catch (CmsException e)
             {
                 throw new TspException(e.Message, e.InnerException);
+            }
+            catch (Exception e)
+            {
+                throw new TspException("malformed timestamp token", e);
             }
         }
 
