@@ -5,6 +5,7 @@ using System.Text;
 
 using NUnit.Framework;
 
+using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.Encoders;
@@ -16,7 +17,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
     public class HssTests
     {
         [Test]
-        public void TestHssKeySerialisation()
+        public void HssKeySerialisation()
         {
             byte[] fixedSource = new byte[8192];
             for (int t = 0; t < fixedSource.Length; t++)
@@ -65,7 +66,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
          * version tells the parser whether the cache field is present (bc-java github #2365).
          */
         [Test]
-        public void TestVersion0HssKeyDecodes()
+        public void Version0HssKeyDecodes()
         {
             ImplVersion0HssKeyDecodes(1);
             ImplVersion0HssKeyDecodes(2);
@@ -109,7 +110,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
          * misparsing the cache as key material.
          */
         [Test]
-        public void TestVersion1HssKeyRoundTrip()
+        public void Version1HssKeyRoundTrip()
         {
             HssPrivateKeyParameters generated = GenerateKey(2);
 
@@ -131,9 +132,9 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
          * out of the signing call rather than being refused as a bad key.
          */
         [Test]
-        public void TestPrivateKeyLevelCountRangeChecked()
+        public void PrivateKeyLevelCountRangeChecked()
         {
-            HssPrivateKeyParameters key = GenerateKey(2);
+            HssPrivateKeyParameters key = GenHssKey();
             byte[] enc = key.GetEncoded();
 
             // d sits at offset 4, after the version
@@ -171,10 +172,10 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
          * catches a tree cache that is self-consistent but belongs to a different key (bc-java github #2414).
          */
         [Test]
-        public void TestPrivateKeyCheckedAgainstSuppliedPublicKey()
+        public void PrivateKeyCheckedAgainstSuppliedPublicKey()
         {
-            HssPrivateKeyParameters keyA = GenerateKey(2);
-            HssPrivateKeyParameters keyB = GenerateKey(2);
+            HssPrivateKeyParameters keyA = GenHssKey();
+            HssPrivateKeyParameters keyB = GenHssKey();
 
             byte[] privA = keyA.GetEncoded();
             byte[] pubA = keyA.GetPublicKey().GetEncoded();
@@ -223,14 +224,14 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
          * From https://tools.ietf.org/html/rfc8554#appendix-F
          */
         [Test]
-        public void TestHssVector_1()
+        public void HssVector_1()
         {
             var blocks = LoadTestResource("pqc/crypto/lms/testcase_1.txt");
 
             HssPublicKeyParameters publicKey = HssPublicKeyParameters.GetInstance(blocks[0]);
             byte[] message = blocks[1];
-            HssSignature signature = HssSignature.GetInstance(blocks[2], publicKey.Level);
-            Assert.True(Hss.VerifySignature(publicKey, signature, message), "Test Case 1 ");
+            byte[] signature = blocks[2];
+            Assert.True(Verify(publicKey, signature, message), "Test Case 1");
         }
 
         /**
@@ -238,20 +239,17 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
          * From https://tools.ietf.org/html/rfc8554#appendix-F
          */
         [Test]
-        public void TestHssVector_2()
+        public void HssVector_2()
         {
             var blocks = LoadTestResource("pqc/crypto/lms/testcase_2.txt");
 
             HssPublicKeyParameters publicKey = HssPublicKeyParameters.GetInstance(blocks[0]);
             byte[] message = blocks[1];
-            byte[] sig = blocks[2];
-            HssSignature signature = HssSignature.GetInstance(sig, publicKey.Level);
-            Assert.True(Hss.VerifySignature(publicKey, signature, message), "Test Case 2 Signature");
+            byte[] signature = blocks[2];
+            Assert.True(Verify(publicKey, signature, message), "Test Case 2 Signature");
 
             LmsPublicKeyParameters lmsPub = LmsPublicKeyParameters.GetInstance(blocks[3]);
-            LmsSignature lmsSignature = LmsSignature.GetInstance(blocks[4]);
-
-            Assert.True(Lms.VerifySignature(lmsPub, lmsSignature, message), "Test Case 2 Signature 2");
+            Assert.True(VerifyLms(lmsPub, blocks[4], message), "Test Case 2 Signature 2");
         }
 
         private IList<byte[]> LoadTestResource(string path)
@@ -288,11 +286,11 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
          * Level 0
          */
         [Test]
-        public void TestGenPublicKeys_L0()
+        public void GenPublicKeys_L0()
         {
             byte[] seed = Hex.Decode("558b8966c48ae9cb898b423c83443aae014a72f1b1ab5cc85cf1d892903b5439");
             int level = 0;
-            LmsPrivateKeyParameters lmsPrivateKey = Lms.GenerateKeys(LMSigParameters.GetParametersByID(6),
+            LmsPrivateKeyParameters lmsPrivateKey = LmsKey(LMSigParameters.GetParametersByID(6),
                 LMOtsParameters.GetParametersByID(3), level, Hex.Decode("d08fabd4a2091ff0a8cb4ed834e74534"), seed);
             LmsPublicKeyParameters publicKey = lmsPrivateKey.GetPublicKey();
             Assert.True(Arrays.AreEqual(publicKey.GetT1(),
@@ -305,11 +303,11 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
          * Level 1;
          */
         [Test]
-        public void TestGenPublicKeys_L1()
+        public void GenPublicKeys_L1()
         {
             byte[] seed = Hex.Decode("a1c4696e2608035a886100d05cd99945eb3370731884a8235e2fb3d4d71f2547");
             int level = 1;
-            LmsPrivateKeyParameters lmsPrivateKey = Lms.GenerateKeys(LMSigParameters.GetParametersByID(5),
+            LmsPrivateKeyParameters lmsPrivateKey = LmsKey(LMSigParameters.GetParametersByID(5),
                 LMOtsParameters.GetParametersByID(4), level, Hex.Decode("215f83b7ccb9acbcd08db97b0d04dc2b"), seed);
             LmsPublicKeyParameters publicKey = lmsPrivateKey.GetPublicKey();
             Assert.True(Arrays.AreEqual(publicKey.GetT1(),
@@ -318,7 +316,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
         }
 
         [Test]
-        public void TestGenerate()
+        public void Generate()
         {
             //
             // Generate an HSS key pair for a two level HSS scheme.
@@ -358,7 +356,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                 "HSSPrivateKeyParameterss equal are deserialization");
 
             //
-            // Generate, hopefully the same HSSKetPair for the same entropy.
+            // Generate, hopefully the same HSSKeyPair for the same entropy.
             // This is a sanity test
             //
             {
@@ -454,7 +452,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
          * @
          */
         [Test]
-        public void TestVectorsFromReference()
+        public void VectorsFromReference()
         {
             StreamReader sr = new StreamReader(SimpleTest.FindTestResource("pqc/crypto/lms/depth_1.txt"));
 
@@ -588,7 +586,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
         }
 
         [Test]
-        public void TestVectorsFromReference_Expanded()
+        public void VectorsFromReference_Expanded()
         {
             using (StreamReader sr = new StreamReader(SimpleTest.FindTestResource("pqc/crypto/lms/expansion.txt")))
             {
@@ -735,7 +733,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
          * @
          */
         [Test]
-        public void TestRemaining()
+        public void Remaining()
         {
             HssPrivateKeyParameters keyPair = Hss.GenerateHssKeyPair(
                 new HssKeyGenerationParameters(new LmsParameters[]
@@ -792,7 +790,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
         }
 
         [Test]
-        public void TestSharding()
+        public void Sharding()
         {
             HssPrivateKeyParameters keyPair = Hss.GenerateHssKeyPair(
                 new HssKeyGenerationParameters(new LmsParameters[]
@@ -879,7 +877,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
         }
 
         [Test]
-        public void TestSignUnitExhaustion()
+        public void SignUnitExhaustion()
         {
             HSSSecureRandom rand = new HSSSecureRandom();
 
@@ -914,16 +912,15 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                         // We don't want to check every key.
                         // The test will take over an hour to complete.
                         //
-                        Pack_Int32_To_BE(ctr, message, 0);
-                        HssSignature sig = Hss.GenerateSignature(keyPair, message);
+                        Pack_UInt32_To_BE((uint)ctr, message, 0);
+                        byte[] sig = Sign(keyPair, message);
 
-                        Assert.True(ctr % 1024 == sig.Signature.Q);
+                        Assert.AreEqual(ctr % 1024, LeafSignatureQ(keyPair, sig));
 
                         // Check there was a post increment in the tail end LMS key.
-                        Assert.True(ctr % 1024 + 1 == keyPair.GetKeys()[keyPair.L - 1].GetIndex());
+                        Assert.AreEqual(ctr % 1024 + 1, keyPair.GetKeys()[keyPair.Level - 1].GetIndex(), "" + ctr);
 
-                        Assert.True(ctr + 1 == keyPair.GetIndex());
-
+                        Assert.AreEqual(ctr + 1, keyPair.GetIndex());
 
                         // Validate the heirarchial path building was correct.
 
@@ -940,41 +937,40 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
 
                         for (int t = 0; t < keyPair.GetKeys().Count; t++)
                         {
-                            Assert.True(keyPair.GetKeys()[t].GetIndex() - 1 == qValues[t]);
+                            Assert.AreEqual(keyPair.GetKeys()[t].GetIndex() - 1, qValues[t], "" + ctr);
                         }
 
-                        Assert.True(Hss.VerifySignature(pk, sig, message));
-                        Assert.True(sig.Signature.SigParameters.ID == LMSigParameters.lms_sha256_n32_h10.ID);
+                        Assert.True(Verify(pk, sig, message));
+                        Assert.AreEqual(LMSigParameters.lms_sha256_n32_h10.ID, LeafSignatureType(keyPair, sig));
 
                         {
                             //
                             // Vandalise hss signature.
                             //
-                            byte[] rawSig = sig.GetEncoded();
+                            byte[] rawSig = sig;
                             rawSig[100] ^= 1;
-                            HssSignature parsedSig = HssSignature.GetInstance(rawSig, pk.Level);
-                            Assert.False(Hss.VerifySignature(pk, parsedSig, message));
+                            byte[] parsedSig = rawSig;
+                            Assert.False(Verify(pk, parsedSig, message));
 
                             try
                             {
-                                HssSignature.GetInstance(rawSig, 0);
+                                // a key claiming one more level than the signature carries
+                                new HssPublicKeyParameters(pk.Level + 1, pk.LmsPublicKey).GenerateLmsContext(rawSig);
                                 Assert.Fail();
                             }
-                            catch (Exception ex)
+                            catch (InvalidOperationException ex)
                             {
-                                Assert.True(ex.Message.Contains("nspk exceeded maxNspk"));
+                                Assert.That(ex.Message.Contains("nspk exceeded maxNspk"));
                             }
-
                         }
 
                         {
                             //
                             // Vandalise hss message
                             //
-                            byte[] newMsg = new byte[message.Length];
-                            message.CopyTo(newMsg, 0);
+                            byte[] newMsg = Arrays.Clone(message);
                             newMsg[1] ^= 1;
-                            Assert.False(Hss.VerifySignature(pk, sig, newMsg));
+                            Assert.False(Verify(pk, sig, newMsg));
                         }
 
                         {
@@ -984,7 +980,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                             byte[] pkEnc = pk.GetEncoded();
                             pkEnc[35] ^= 1;
                             HssPublicKeyParameters rebuiltPk = HssPublicKeyParameters.GetInstance(pkEnc);
-                            Assert.False(Hss.VerifySignature(rebuiltPk, sig, message));
+                            Assert.False(Verify(rebuiltPk, sig, message));
                         }
                     }
                     else
@@ -996,10 +992,9 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                     ctr++;
                 }
 
-                //System.out.Println(ctr);
                 Assert.Fail();
             }
-            catch (Exception ex)
+            catch (ExhaustedPrivateKeyException ex)
             {
                 Assert.True(keyPair.GetUsagesRemaining() == 0);
                 Assert.True(ctr == 32768);
@@ -1007,12 +1002,184 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
             }
         }
 
-        private static void Pack_Int32_To_BE(int n, byte[] bs, int off)
+        [Test]
+        public void IndexRollbackRejected()
+        {
+            HssPrivateKeyParameters key = GenHssKey();
+            HssSigner signer = new HssSigner();
+            signer.Init(true, key);
+            for (int i = 0; i != 5; i++)
+            {
+                signer.GenerateSignature(Hex.Decode("48656c6c6f"));
+            }
+
+            byte[] enc = key.GetEncoded();
+            Assert.AreEqual(5UL, Pack_BE_To_UInt64(enc, 8));
+
+            // roll the declared index back, leaving the component keys advanced
+            for (int roll = 0; roll != 5; roll++)
+            {
+                byte[] rolled = Arrays.Clone(enc);
+                Pack_UInt64_To_BE((ulong)roll, rolled, 8);
+                try
+                {
+                    HssPrivateKeyParameters.GetInstance(rolled);
+                    Assert.Fail("no exception on index rolled back to " + roll);
+                }
+                catch (IOException e)
+                {
+                    Assert.That(e.Message.StartsWith($"HSS private key index {roll} does not match the component key indices"),
+                        e.Message);
+                }
+            }
+
+            // and the other direction: roll a component key's q back, leaving the declared index alone
+            int secretLen = (int)Pack_BE_To_UInt32(enc, 25 + 28 + 8);
+            int cacheCount = (int)Pack_BE_To_UInt32(enc, 25 + 40 + secretLen);
+            int m = LMSigParameters.lms_sha256_n32_h5.M;
+            int componentSize = 4 + 4 + 4 + 16 + 4 + 4 + 4 + secretLen + 4 + cacheCount * m;
+            int lastQOff = 25 + componentSize + 28;
+            Assert.True(Pack_BE_To_UInt32(enc, lastQOff) > 0U, "component q should be advanced");
+
+            byte[] qRolled = Arrays.Clone(enc);
+            Pack_UInt32_To_BE(0U, qRolled, lastQOff);
+            try
+            {
+                HssPrivateKeyParameters.GetInstance(qRolled);
+                Assert.Fail("no exception on component key q rolled back");
+            }
+            catch (IOException e)
+            {
+                Assert.True(e.Message.StartsWith("HSS private key index"), e.Message);
+            }
+
+            // the untouched encoding still decodes and signs verifiably
+            HssPrivateKeyParameters decoded = HssPrivateKeyParameters.GetInstance(enc);
+            Assert.AreEqual(5L, decoded.GetIndex());
+            byte[] msg = Hex.Decode("48656c6c6f");
+            Assert.True(Verify(key.GetPublicKey(), Sign(decoded, msg), msg));
+        }
+
+        /// <sumamry>
+        /// Encode and decode across a subtree boundary, and round-trip a shard - the compatibility half of
+        /// <see cref="IndexRollbackRejected"/>. A level above the last carries a q that has already advanced past the
+        /// subtree it signed, so the identity the check applies has to account for that; walking across the boundary
+        /// where the lower tree is replaced is what proves it does.
+        /// </sumamry>
+        [Test]
+        public void IndexRoundTripsAcrossSubtreeBoundary()
+        {
+            HssPrivateKeyParameters key = GenHssKey();
+            HssPublicKeyParameters pub = key.GetPublicKey();
+            HssSigner signer = new HssSigner();
+            byte[] msg = Hex.Decode("48656c6c6f");
+
+            // 2^5 = 32 signatures per tree, so 40 crosses the boundary and rebuilds the lower tree
+            for (int i = 0; i != 40; i++)
+            {
+                HssPrivateKeyParameters decoded = HssPrivateKeyParameters.GetInstance(key.GetEncoded());
+                Assert.AreEqual(key.GetIndex(), decoded.GetIndex());
+                Assert.True(Verify(pub, Sign(decoded, msg), msg), "index " + key.GetIndex());
+
+                signer.Init(true, key);
+                signer.GenerateSignature(msg);
+            }
+
+            HssPrivateKeyParameters shard = key.ExtractKeyShard(4);
+            HssPrivateKeyParameters decodedShard = HssPrivateKeyParameters.GetInstance(shard.GetEncoded());
+            Assert.AreEqual(shard.GetIndex(), decodedShard.GetIndex());
+        }
+
+        private static HssPrivateKeyParameters GenHssKey()
+        {
+            HssKeyPairGenerator gen = new HssKeyPairGenerator();
+            gen.Init(new HssKeyGenerationParameters(new LmsParameters[]{
+                new LmsParameters(LMSigParameters.lms_sha256_n32_h5, LMOtsParameters.sha256_n32_w1),
+                new LmsParameters(LMSigParameters.lms_sha256_n32_h5, LMOtsParameters.sha256_n32_w1) },
+                new SecureRandom()));
+            return (HssPrivateKeyParameters)gen.GenerateKeyPair().Private;
+        }
+
+        private static byte[] Sign(HssPrivateKeyParameters key, byte[] message)
+        {
+            HssSigner signer = new HssSigner();
+            signer.Init(true, key);
+            return signer.GenerateSignature(message);
+        }
+
+        private static bool Verify(HssPublicKeyParameters key, byte[] signature, byte[] message)
+        {
+            HssSigner signer = new HssSigner();
+            signer.Init(false, key);
+            return signer.VerifySignature(message, signature);
+        }
+
+        private static bool VerifyLms(LmsPublicKeyParameters key, byte[] signature, byte[] message)
+        {
+            LmsSigner signer = new LmsSigner();
+            signer.Init(false, key);
+            return signer.VerifySignature(message, signature);
+        }
+
+        private static LmsPrivateKeyParameters LmsKey(LMSigParameters sigParams, LMOtsParameters otsParams, int q,
+            byte[] I, byte[] seed)
+        {
+            return new LmsPrivateKeyParameters(sigParams, otsParams, q, I, 1 << sigParams.H, seed);
+        }
+
+        // The leaf tree's LMS signature is the tail of an HSS signature (RFC 8554 sec. 6.1); its
+        // length follows from the leaf key's parameters (sec. 5.4): u32str(q) || ots_signature ||
+        // u32str(type) || path, where ots_signature is u32str(otstype) || C || y (sec. 4.5).
+        private static int LeafSignatureOffset(HssPrivateKeyParameters key, byte[] hssSignature)
+        {
+            LmsPrivateKeyParameters leaf = key.GetKeys()[key.Level - 1];
+            int n = leaf.OtsParameters.N;
+            int p = leaf.OtsParameters.P;
+            int h = leaf.SigParameters.H;
+            int m = leaf.SigParameters.M;
+
+            return hssSignature.Length - (4 + (4 + n + p * n) + 4 + h * m);
+        }
+
+        private static int LeafSignatureQ(HssPrivateKeyParameters key, byte[] hssSignature) =>
+            (int)Pack_BE_To_UInt32(hssSignature, LeafSignatureOffset(key, hssSignature));
+
+        private static int LeafSignatureType(HssPrivateKeyParameters key, byte[] hssSignature)
+        {
+            LmsPrivateKeyParameters leaf = key.GetKeys()[key.Level - 1];
+            int h = leaf.SigParameters.H;
+            int m = leaf.SigParameters.M;
+
+            return (int)Pack_BE_To_UInt32(hssSignature, hssSignature.Length - h * m - 4);
+        }
+
+        private static uint Pack_BE_To_UInt32(byte[] bs, int off)
+        {
+            return (uint)bs[off] << 24
+                | (uint)bs[off + 1] << 16
+                | (uint)bs[off + 2] << 8
+                | bs[off + 3];
+        }
+
+        private static ulong Pack_BE_To_UInt64(byte[] bs, int off)
+        {
+            uint hi = Pack_BE_To_UInt32(bs, off);
+            uint lo = Pack_BE_To_UInt32(bs, off + 4);
+            return ((ulong)hi << 32) | (ulong)lo;
+        }
+
+        private static void Pack_UInt32_To_BE(uint n, byte[] bs, int off)
         {
             bs[off] = (byte)(n >> 24);
             bs[off + 1] = (byte)(n >> 16);
             bs[off + 2] = (byte)(n >> 8);
             bs[off + 3] = (byte)n;
+        }
+
+        private static void Pack_UInt64_To_BE(ulong n, byte[] bs, int off)
+        {
+            Pack_UInt32_To_BE((uint)(n >> 32), bs, off);
+            Pack_UInt32_To_BE((uint)n, bs, off + 4);
         }
 
         private static bool TrimLine(ref string line)

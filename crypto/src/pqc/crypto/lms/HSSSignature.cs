@@ -49,7 +49,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
         {
             int lMinus1 = BinaryReaders.ReadInt32BigEndian(binaryReader);
             if (lMinus1 != L - 1)
-                throw new Exception("nspk exceeded maxNspk");
+                throw new InvalidOperationException("nspk exceeded maxNspk");
 
             var signedPubKeys = new LmsSignedPubKey[lMinus1];
             for (int t = 0; t < lMinus1; t++)
