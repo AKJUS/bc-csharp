@@ -634,7 +634,11 @@ namespace Org.BouncyCastle.Pkcs
             if (certEntry == null)
                 throw new ArgumentNullException(nameof(certEntry));
             if (m_keys.ContainsKey(alias))
-                throw new ArgumentException("There is a key entry with the name " + alias + ".");
+                throw new ArgumentException($"There is a key entry with the name {alias}.", nameof(alias));
+
+            // Added to match bc-java, though it should be impossible for our X509Certificate
+            if (certEntry.Certificate.GetPublicKey() == null)
+                throw new ArgumentException("Unable to resolve public key for certificate", nameof(certEntry));
 
             Map(m_certs, m_certsOrder, alias, certEntry);
             Map(m_chainCerts, m_chainCertsOrder, new CertID(certEntry), certEntry);
@@ -715,6 +719,16 @@ namespace Org.BouncyCastle.Pkcs
             bool chainProvided = !Arrays.IsNullOrEmpty(chain);
             if (keyEntry.Key.IsPrivate && !chainProvided)
                 throw new ArgumentException("No certificate chain for private key", nameof(chain));
+
+            // Added to match bc-java, though it should be impossible for our X509Certificate
+            if (chainProvided)
+            {
+                for (int i = 0; i < chain.Length; ++i)
+                {
+                    if (chain[i].Certificate.GetPublicKey() == null)
+                        throw new ArgumentException($"Unable to resolve public key for certificate {i}", nameof(chain));
+                }
+            }
 
             if (m_keys.ContainsKey(alias))
             {
