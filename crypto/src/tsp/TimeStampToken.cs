@@ -36,10 +36,8 @@ namespace Org.BouncyCastle.Tsp
             var signers = m_tsToken.GetSignerInfos().GetSigners();
             if (signers.Count != 1)
             {
-                // TODO[api] TspValidationException
-                throw new ArgumentException("Time-stamp token signed by "
-                    + signers.Count
-                    + " signers, but it must contain just the TSA signature.");
+                throw new TspValidationException(
+                    $"Time-stamp token signed by {signers.Count} signers, but it must contain just the TSA signature.");
             }
 
             m_tsaSignerInfo = signers[0];
