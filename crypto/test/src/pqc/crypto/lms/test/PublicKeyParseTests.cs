@@ -61,7 +61,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                 LmsPublicKeyParameters.GetInstance(enc);
                 Assert.Fail("unknown LMS typecode accepted");
             }
-            catch (InvalidDataException e)
+            catch (IOException e)
             {
                 Assert.AreEqual("unknown LMS type code: 238", e.Message);
             }
@@ -78,7 +78,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                 LmsPublicKeyParameters.GetInstance(enc);
                 Assert.Fail("unknown LM-OTS typecode accepted");
             }
-            catch (InvalidDataException e)
+            catch (IOException e)
             {
                 Assert.AreEqual("unknown LM-OTS type code: 238", e.Message);
             }
@@ -95,7 +95,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                 HssPublicKeyParameters.GetInstance(enc);
                 Assert.Fail("unknown LMS typecode accepted");
             }
-            catch (InvalidDataException e)
+            catch (IOException e)
             {
                 Assert.AreEqual("unknown LMS type code: 238", e.Message);
             }
@@ -112,7 +112,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                     HssPublicKeyParameters.GetInstance(ValidHssPublicKey(badL[i]));
                     Assert.Fail("HSS L value " + badL[i] + " accepted");
                 }
-                catch (InvalidDataException e)
+                catch (IOException e)
                 {
                     Assert.AreEqual("L value of HSS public key out of range: " + badL[i], e.Message);
                 }
@@ -129,7 +129,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                 HssPublicKeyParameters.GetInstance(hssTrailing);
                 Assert.Fail("trailing data after HSS public key accepted");
             }
-            catch (InvalidDataException e)
+            catch (IOException e)
             {
                 Assert.AreEqual("unexpected data found after HSS public key", e.Message);
             }
@@ -145,7 +145,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                 LmsPublicKeyParameters.GetInstance(lmsTrailing);
                 Assert.Fail("trailing data after LMS public key accepted");
             }
-            catch (InvalidDataException e)
+            catch (IOException e)
             {
                 Assert.AreEqual("unexpected data found after LMS public key", e.Message);
             }

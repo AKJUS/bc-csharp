@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 using NUnit.Framework;
 
 namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
@@ -18,50 +16,55 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
             LmsSignature dummySig = new LmsSignature(0, null, null, null);
 
             {
-                var keys = new List<LmsPrivateKeyParameters>();
-                keys.Add(new LmsPrivateKeyParameters(LMSigParameters.lms_sha256_n32_h5, null, 0, null, 0, new byte[32]));
-
-                var sig = new List<LmsSignature>();
-                sig.Add(dummySig);
-
-                object o = new HssPrivateKeyParameters(0, keys, sig, 1, 2);
-                Assert.True(o.Equals(HssPrivateKeyParameters.GetInstance(o)));
+                object o = new HssPrivateKeyParameters(LmsKey(), 1, 2);
+                Assert.AreSame(o, HssPrivateKeyParameters.GetInstance(o));
             }
 
             {
                 object o = new HssPublicKeyParameters(0, new LmsPublicKeyParameters(null, null, null, null));
-                Assert.True(o.Equals(HssPublicKeyParameters.GetInstance(o)));
+                Assert.AreSame(o, HssPublicKeyParameters.GetInstance(o));
             }
 
             {
                 object o = new HssSignature(0, null, null);
-                Assert.True(o.Equals(HssSignature.GetInstance(o, 0)));
+                Assert.AreSame(o, HssSignature.GetInstance(o, 0));
             }
 
             {
                 object o = new LMOtsPublicKey(null, null, 0, null);
-                Assert.True(o.Equals(LMOtsPublicKey.GetInstance(o)));
+                Assert.AreSame(o, LMOtsPublicKey.GetInstance(o));
             }
 
             {
                 object o = new LMOtsSignature(null, null, null);
-                Assert.True(o.Equals(LMOtsSignature.GetInstance(o)));
+                Assert.AreSame(o, LMOtsSignature.GetInstance(o));
             }
 
             {
-                object o = new LmsPrivateKeyParameters(LMSigParameters.lms_sha256_n32_h5, null, 0, null, 0, null);
-                Assert.True(o.Equals(LmsPrivateKeyParameters.GetInstance(o)));
+                object o = LmsKey();
+                Assert.AreSame(o, LmsPrivateKeyParameters.GetInstance(o));
             }
 
             {
                 object o = new LmsPublicKeyParameters(null, null, null, null);
-                Assert.True(o.Equals(LmsPublicKeyParameters.GetInstance(o)));
+                Assert.AreSame(o, LmsPublicKeyParameters.GetInstance(o));
             }
 
             {
                 object o = new LmsSignature(0, null, null, null);
-                Assert.True(o.Equals(LmsSignature.GetInstance(o)));
+                Assert.AreSame(o, LmsSignature.GetInstance(o));
             }
+        }
+
+        /// <summary>
+        /// The key parameter constructors validate their arguments, so these are real -the point of the test is only
+        /// that GetInstance() hands back an object of its own type unchanged.
+        /// </summary>
+        private static LmsPrivateKeyParameters LmsKey()
+        {
+            return new LmsPrivateKeyParameters(LMSigParameters.lms_sha256_n32_h5,
+                LMOtsParameters.sha256_n32_w1, 0, new byte[16], 1 << LMSigParameters.lms_sha256_n32_h5.H,
+                new byte[LMSigParameters.lms_sha256_n32_h5.M]);
         }
     }
 }

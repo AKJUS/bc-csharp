@@ -41,19 +41,14 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                         0,
                         I,
                         1 << lms.LMSigParameters.H,
-                        rootSeed,
-                        isPlaceholder: false);
+                        rootSeed);
                 }
                 else
                 {
                     keys[t] = new LmsPrivateKeyParameters(
                         lms.LMSigParameters,
                         lms.LMOtsParameters,
-                        -1,
-                        zero,
-                        1 << lms.LMSigParameters.H,
-                        zero,
-                        isPlaceholder: true);
+                        1 << lms.LMSigParameters.H);
                 }
                 hssKeyMaxIndex <<= lms.LMSigParameters.H;
             }

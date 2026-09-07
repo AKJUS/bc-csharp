@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 using NUnit.Framework;
 
 using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.Encoders;
 
@@ -220,7 +222,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
             // cached children and compared before the cache is primed into the tree (bc-java github #2414).
             byte[] corruptedEnc = Arrays.Clone(enc);
             corruptedEnc[76 + 2 * m] ^= 1;
-            var ex = Assert.Throws<InvalidDataException>(
+            var ex = Assert.Throws<IOException>(
                 () => LmsPrivateKeyParameters.GetInstance(corruptedEnc));
             Assert.True(ex.Message.StartsWith("LMS private key tree cache inconsistent at node"));
 
@@ -280,7 +282,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                 .U32Str(cacheCountLimit)
                 .Bytes(new byte[cacheCountLimit * m])
                 .Build();
-            var ex0 = Assert.Throws<InvalidDataException>(
+            var ex0 = Assert.Throws<IOException>(
                 () => LmsPrivateKeyParameters.GetInstance(zeroed));
             Assert.True(ex0.Message.StartsWith("LMS private key tree cache inconsistent at node"));
 
@@ -295,7 +297,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                 .Bytes(seed)
                 .U32Str(cacheCountLimit + 1)
                 .Build();
-            var ex1 = Assert.Throws<InvalidDataException>(
+            var ex1 = Assert.Throws<IOException>(
                 () => LmsPrivateKeyParameters.GetInstance(beyondLimit));
             Assert.True(ex1.Message.StartsWith("tree cache node count out of range"));
 
@@ -311,17 +313,230 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                 .U32Str(cacheCountLimit)
                 .Bytes(new byte[cacheCountLimit * m - 1])
                 .Build();
-            var ex2 = Assert.Throws<InvalidDataException>(
+            var ex2 = Assert.Throws<IOException>(
                 () => LmsPrivateKeyParameters.GetInstance(truncated));
             Assert.True(ex2.Message.StartsWith("tree cache length exceeded"));
         }
 
-        /**
-         * Every single-byte corruption of the tree cache is rejected at decode, and the one-time index q and
-         * its limit maxQ are range checked. Both were unchecked before bc-java github #2414: a corrupt cache
-         * primed into the tree yields signatures that do not verify, and a q outside the tree signs with a
-         * one-time key the public key does not commit to.
-         */
+        /// <summary>
+        /// Every single-byte corruption of the tree cache is rejected at decode. Before github bc-java #2414 the cached
+        /// node values were read but never checked, so a corrupt cache was primed into the tree: altering the root
+        /// changed the public key the key reported (and survived a re-encode), and altering other nodes produced
+        /// signatures that did not verify - both silently.
+        /// </summary>
+        [Test]
+        public void TreeCacheCorruptionRejected()
+        {
+            LMSigParameters sigParams = LMSigParameters.lms_sha256_n32_h5;
+            LMOtsParameters otsParams = LMOtsParameters.sha256_n32_w1;
+            int m = sigParams.M;
+
+            LmsKeyPairGenerator gen = new LmsKeyPairGenerator();
+            gen.Init(new LmsKeyGenerationParameters(new LmsParameters(sigParams, otsParams), new SecureRandom()));
+            LmsPrivateKeyParameters priv = (LmsPrivateKeyParameters)gen.GenerateKeyPair().Private;
+            byte[] enc = priv.GetEncoded();
+
+            int countOff = 40 + ReadU32(enc, 36);
+            int cacheCount = ReadU32(enc, countOff);
+            int cacheOff = countOff + 4;
+            Assert.Greater(cacheCount, 0, "expected a primed cache to corrupt");
+
+            for (int r = 1; r <= cacheCount; r++)
+            {
+                for (int b = 0; b < m; b++)
+                {
+                    byte[] corrupt = Arrays.Clone(enc);
+                    corrupt[cacheOff + (r - 1) * m + b] ^= 0x01;
+                    try
+                    {
+                        LmsPrivateKeyParameters.GetInstance(corrupt);
+                        Assert.Fail("no exception on corrupt cache node " + r + " byte " + b);
+                    }
+                    catch (IOException e)
+                    {
+                        Assert.That(e.Message.StartsWith("LMS private key tree cache inconsistent at node"));
+                    }
+                }
+            }
+
+            // the untouched encoding still decodes, primes and signs verifiably
+            LmsPrivateKeyParameters decoded = LmsPrivateKeyParameters.GetInstance(enc);
+            // TODO[lms] IsTreeCachePrimed
+            //Assert.True(decoded.IsTreeCachePrimed());
+            byte[] msg = Hex.Decode("48656c6c6f");
+            Assert.True(Verify(priv.GetPublicKey(), Sign(decoded, msg), msg));
+        }
+
+        /// <summary>
+        /// The key parameter constructors apply the checks the decoder applies, so a key built directly cannot be one
+        /// the decoder would refuse. <see cref="LmsPrivateKeyParameters"/> accepted an identifier of any length
+        /// although the decoder reads exactly 16 bytes - such a key encoded but could not be read back - and left q,
+        /// maxQ and the seed length unchecked although all three are checked at decode;
+        /// <see cref="HssPrivateKeyParameters"/> checked neither its level count nor that it had been given a component
+        /// key and a chaining signature per level, and then indexed both lists.
+        /// </summary>
+        [Test]
+        public void KeyParameterConstructorsValidate()
+        {
+            LMSigParameters sigParams = LMSigParameters.lms_sha256_n32_h5;
+            LMOtsParameters otsParams = LMOtsParameters.sha256_n32_w1;
+            int twoToH = 1 << sigParams.H;
+            byte[] I = new byte[16];
+            byte[] seed = new byte[sigParams.M];
+
+            // the well-formed case is unaffected
+            Assert.NotNull(new LmsPrivateKeyParameters(sigParams, otsParams, 0, I, twoToH, seed));
+
+            ExpectBadArgument("LMS key identifier I must be 16 bytes", sigParams, otsParams, 0, new byte[15], twoToH,
+                seed);
+            ExpectBadArgument("LMS key identifier I must be 16 bytes", sigParams, otsParams, 0, new byte[17], twoToH,
+                seed);
+            ExpectBadArgument("LMS key identifier I must be 16 bytes", sigParams, otsParams, 0, null, twoToH, seed);
+            ExpectBadArgument("LMS private key needs both parameter sets", sigParams, null, 0, I, twoToH, seed);
+            ExpectBadArgument("master secret is less than " + sigParams.M, sigParams, otsParams, 0, I, twoToH,
+                new byte[1]);
+            ExpectBadArgument("LMS private key q/maxQ out of range: q=-1 maxQ=" + twoToH + " 2^h=" + twoToH, sigParams,
+                otsParams, -1, I, twoToH, seed);
+            ExpectBadArgument("LMS private key q/maxQ out of range: q=0 maxQ=" + (twoToH + 1) + " 2^h=" + twoToH,
+                sigParams, otsParams, 0, I, twoToH + 1, seed);
+            ExpectBadArgument("LMS private key q/maxQ out of range: q=5 maxQ=4 2^h=" + twoToH, sigParams, otsParams, 5,
+                I, 4, seed);
+
+            // and a key that survives the constructor round-trips through the decoder
+            LmsPrivateKeyParameters key = new LmsPrivateKeyParameters(sigParams, otsParams, 0, I, twoToH, seed);
+            Assert.NotNull(LmsPrivateKeyParameters.GetInstance(key.GetEncoded()));
+
+            // HSS: level count, list sizes and the index pair
+            List<LmsPrivateKeyParameters> one = new List<LmsPrivateKeyParameters>(){ key };
+            List<LmsSignature> none = new List<LmsSignature>();
+
+            ExpectBadHss("L value of HSS private key out of range: 0", 0, one, none, 0, twoToH);
+            ExpectBadHss("L value of HSS private key out of range: 9", 9, one, none, 0, twoToH);
+            ExpectBadHss("HSS private key needs one component key per level", 2, one, none, 0, twoToH);
+            ExpectBadHss("HSS private key index out of range: index=5 indexLimit=4", 1, one, none, 5, 4);
+            ExpectBadHss("HSS private key index out of range: index=-1 indexLimit=4", 1, one, none, -1, 4);
+
+            // the well-formed single-level case still builds
+            Assert.NotNull(new HssPrivateKeyParameters(1, one, none, 0, twoToH));
+        }
+
+        private static void ExpectBadArgument(String message, LMSigParameters sigParams, LMOtsParameters otsParams,
+            int q, byte[] I, int maxQ, byte[] seed)
+        {
+            try
+            {
+                new LmsPrivateKeyParameters(sigParams, otsParams, q, I, maxQ, seed);
+                Assert.Fail("no exception for: " + message);
+            }
+            catch (ArgumentException e)
+            {
+                Assert.That(e.Message.StartsWith(message));
+            }
+        }
+
+        private static void ExpectBadHss(String message, int l, List<LmsPrivateKeyParameters> keys,
+            List<LmsSignature> sig, long index, long indexLimit)
+        {
+            try
+            {
+                new HssPrivateKeyParameters(l, keys, sig, index, indexLimit);
+                Assert.Fail("no exception for: " + message);
+            }
+            catch (ArgumentException e)
+            {
+                Assert.That(e.Message.StartsWith(message));
+            }
+        }
+
+        /// <summary>
+        /// A tree cache node count that is not a complete top of tree - 2^k - 1 nodes - is refused at decode. The
+        /// consistency check recomputes a cached node from its two cached children, so a node with no cached sibling
+        /// pair above it would be read but never checked: at a count of 1 or 2 that is the root itself, so a corrupted
+        /// root was primed and the key reported the wrong public key, and at any even count it is the last node, so a
+        /// corrupted one survived and was carried forward by the next getEncoded().This writer only ever emits 63, or
+        /// 31 for a height-5 shard.
+        /// </summary>
+        [Test]
+        public void TreeCacheIncompleteTopOfTreeRejected()
+        {
+            LMSigParameters sigParams = LMSigParameters.lms_sha256_n32_h5;
+            LMOtsParameters otsParams = LMOtsParameters.sha256_n32_w1;
+            int m = sigParams.M;
+
+            LmsKeyPairGenerator gen = new LmsKeyPairGenerator();
+            gen.Init(new LmsKeyGenerationParameters(new LmsParameters(sigParams, otsParams), new SecureRandom()));
+            LmsPrivateKeyParameters priv = (LmsPrivateKeyParameters)gen.GenerateKeyPair().Private;
+            byte[] enc = priv.GetEncoded();
+
+            int countOff = 40 + ReadU32(enc, 36);
+            int cacheCount = ReadU32(enc, countOff);
+            Assert.AreEqual(63, cacheCount, "this writer should emit a full top of tree");
+
+            int[] incomplete = new int[]{ 1, 2, 4, 5, 6, 8, 30, 62 };
+            for (int i = 0; i != incomplete.Length; i++)
+            {
+                int count = incomplete[i];
+                try
+                {
+                    LmsPrivateKeyParameters.GetInstance(WithNodeCount(enc, countOff, m, count));
+                    Assert.Fail("no exception on an incomplete tree cache of " + count + " nodes");
+                }
+                catch (IOException e)
+                {
+                    Assert.AreEqual("tree cache node count is not a complete top of tree: " + count, e.Message);
+                }
+            }
+
+            // the shapes this writer produces, and an absent cache, are still accepted
+            int[] complete = new int[]{ 0, 3, 7, 15, 31, 63 };
+            for (int i = 0; i != complete.Length; i++)
+            {
+                LmsPrivateKeyParameters decoded = LmsPrivateKeyParameters.GetInstance(
+                    WithNodeCount(enc, countOff, m, complete[i]));
+                Assert.True(Arrays.AreEqual(priv.GetPublicKey().GetEncoded(), decoded.GetPublicKey().GetEncoded()),
+                    "complete top of tree of " + complete[i] + " nodes was refused");
+            }
+
+            // a corrupted node in each refused shape is what the restriction is there to stop reaching
+            // the tree: at count 1 and 2 the root, at count 62 the last node
+            int[][] corruptCases = new int[][]{ new int[]{ 1, 1 }, new int[] { 2, 1 }, new int[] { 62, 62 } };
+            for (int i = 0; i != corruptCases.Length; i++)
+            {
+                byte[] truncated = WithNodeCount(enc, countOff, m, corruptCases[i][0]);
+                truncated[countOff + 4 + (corruptCases[i][1] - 1) * m] ^= 0x01;
+                try
+                {
+                    LmsPrivateKeyParameters.GetInstance(truncated);
+                    Assert.Fail("corrupt node " + corruptCases[i][1] + " accepted at count " + corruptCases[i][0]);
+                }
+                catch (IOException e)
+                {
+                    Assert.AreEqual("tree cache node count is not a complete top of tree: " + corruptCases[i][0],
+                        e.Message);
+                }
+            }
+        }
+
+        /// <summary>
+        /// The passed in encoding with its tree cache cut down to the first nodeCount nodes.
+        /// </summary>
+        private static byte[] WithNodeCount(byte[] enc, int countOff, int m, int nodeCount)
+        {
+            byte[] rebuilt = new byte[countOff + 4 + nodeCount * m];
+
+            Array.Copy(enc, 0, rebuilt, 0, countOff);
+            WriteU32(nodeCount, rebuilt, countOff);
+            Array.Copy(enc, countOff + 4, rebuilt, countOff + 4, nodeCount * m);
+
+            return rebuilt;
+        }
+
+        /// <summary>
+        /// Every single-byte corruption of the tree cache is rejected at decode, and the one-time index q and its limit
+        /// maxQ are range checked. Both were unchecked before github bc-java #2414: a corrupt cache primed into the
+        /// tree yields signatures that do not verify, and a q outside the tree signs with a one-time key the public key
+        /// does not commit to.
+        /// </summary>
         [Test]
         public void TestPrivateKeyDecodeValidation()
         {
@@ -344,7 +559,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
             {
                 byte[] corrupt = Arrays.Clone(enc);
                 corrupt[cacheOff + (r - 1) * m] ^= 0x01;
-                var ex = Assert.Throws<InvalidDataException>(
+                var ex = Assert.Throws<IOException>(
                     () => LmsPrivateKeyParameters.GetInstance(corrupt), "no exception on corrupt cache node " + r);
                 Assert.True(ex.Message.StartsWith("LMS private key tree cache inconsistent at node"));
             }
@@ -365,7 +580,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                     .U32Str(seed.Length)
                     .Bytes(seed)
                     .Build();
-                var ex = Assert.Throws<InvalidDataException>(
+                var ex = Assert.Throws<IOException>(
                     () => LmsPrivateKeyParameters.GetInstance(bogus),
                     "no exception on q=" + bad[i][0] + " maxQ=" + bad[i][1]);
                 Assert.True(ex.Message.StartsWith("LMS private key q/maxQ out of range"));
@@ -435,9 +650,9 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
             Assert.True(Arrays.AreEqual(pubA, decoded.GetPublicKey().GetEncoded()));
 
             // another key's public key: refused
-            var ex = Assert.Throws<InvalidDataException>(
+            var ex = Assert.Throws<IOException>(
                 () => LmsPrivateKeyParameters.GetInstance(privA, pubB));
-            Assert.True(ex.Message.StartsWith("LMS private key tree cache does not match"));
+            Assert.True(ex.Message.StartsWith("LMS public key does not match the private key"));
         }
 
         /**
@@ -461,7 +676,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                 .U32Str(seed.Length)
                 .Bytes(seed)
                 .Build();
-            var ex1 = Assert.Throws<InvalidDataException>(
+            var ex1 = Assert.Throws<IOException>(
                 () => LmsPrivateKeyParameters.GetInstance(unknownSigType));
             Assert.True(ex1.Message.StartsWith("unknown LMS type code"));
 
@@ -475,12 +690,35 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                 .U32Str(seed.Length)
                 .Bytes(seed)
                 .Build();
-            var ex2 = Assert.Throws<InvalidDataException>(
+            var ex2 = Assert.Throws<IOException>(
                 () => LmsPrivateKeyParameters.GetInstance(unknownOtsType));
             Assert.True(ex2.Message.StartsWith("unknown LM-OTS type code"));
         }
 
         private static int ReadU32(byte[] buf, int off) =>
             (buf[off] << 24) | (buf[off + 1] << 16) | (buf[off + 2] << 8) | buf[off + 3];
+
+        private static void WriteU32(int x, byte[] bs, int off)
+        {
+            uint n = (uint)x;
+            bs[off] = (byte)(n >> 24);
+            bs[off + 1] = (byte)(n >> 16);
+            bs[off + 2] = (byte)(n >> 8);
+            bs[off + 3] = (byte)n;
+        }
+
+        private static byte[] Sign(LmsPrivateKeyParameters key, byte[] message)
+        {
+            LmsSigner signer = new LmsSigner();
+            signer.Init(true, key);
+            return signer.GenerateSignature(message);
+        }
+
+        private static bool Verify(LmsPublicKeyParameters key, byte[] signature, byte[] message)
+        {
+            LmsSigner signer = new LmsSigner();
+            signer.Init(false, key);
+            return signer.VerifySignature(message, signature);
+        }
     }
 }

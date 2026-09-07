@@ -2,6 +2,7 @@ using System;
 using System.IO;
 
 using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Security;
 
 namespace Org.BouncyCastle.Pqc.Crypto.Lms
 {
@@ -13,6 +14,8 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
         public void Init(bool forSigning, ICipherParameters param)
         {
+            param = ParameterUtilities.IgnoreRandom(param);
+
             if (forSigning)
             {
                 if (param is HssPrivateKeyParameters hssPriv)

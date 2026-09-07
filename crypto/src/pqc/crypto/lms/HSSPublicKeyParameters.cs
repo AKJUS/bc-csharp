@@ -39,7 +39,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
         {
             int L = BinaryReaders.ReadInt32BigEndian(binaryReader);
             if (L < 1 || L > 8)    // RFC 8554, Section 6.
-                throw new InvalidDataException($"L value of HSS public key out of range: {L}");
+                throw new IOException($"L value of HSS public key out of range: {L}");
 
             LmsPublicKeyParameters lmsPublicKey = LmsPublicKeyParameters.Parse(binaryReader);
             return new HssPublicKeyParameters(L, lmsPublicKey);

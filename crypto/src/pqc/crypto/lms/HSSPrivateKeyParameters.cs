@@ -19,10 +19,42 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
         private readonly long m_indexLimit;
         private long m_index = 0;
 
+        public HssPrivateKeyParameters(LmsPrivateKeyParameters key, long index, long indexLimit)
+            : base(true)
+        {
+            m_level = 1;
+            m_isShard = false;
+            m_keys = new List<LmsPrivateKeyParameters>() { key };
+            m_sig = new List<LmsSignature>();
+            m_index = index;
+            m_indexLimit = indexLimit;
+
+            //
+            // Correct Intermediate LMS values will be constructed during reset to index.
+            //
+            ResetKeyToIndex();
+        }
+
         public HssPrivateKeyParameters(int l, IList<LmsPrivateKeyParameters> keys, IList<LmsSignature> sig, long index,
             long indexLimit)
             : base(true)
         {
+            // the same shape the decoder requires; resetKeyToIndex below indexes both lists against l
+            if (l < 1 || l > 8)    // RFC 8554, Section 6.
+                throw new ArgumentException("L value of HSS private key out of range: " + l, nameof(l));
+            if (keys.Count != l)
+                throw new ArgumentException("HSS private key needs one component key per level", nameof(keys));
+            if (sig.Count != l - 1)
+            {
+                throw new ArgumentException("HSS private key needs one chaining signature per level below the root",
+                    nameof(sig));
+            }
+            if (index < 0 || indexLimit < 0 || index > indexLimit)
+            {
+                throw new ArgumentException(
+                    $"HSS private key index out of range: index={index} indexLimit={indexLimit}", nameof(index));
+            }
+
             m_level = l;
             m_isShard = false;
             m_keys = new List<LmsPrivateKeyParameters>(keys);
@@ -34,6 +66,10 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             // Correct Intermediate LMS values will be constructed during reset to index.
             //
             ResetKeyToIndex();
+
+            // a null level is legitimate on the way in, for the reset above to fill, but not on the way out
+            if (m_keys.Contains(null) || m_sig.Contains(null))
+                throw new ArgumentException("HSS private key has a level that was left unconstructed");
         }
 
         private HssPrivateKeyParameters(int l, IList<LmsPrivateKeyParameters> keys, IList<LmsSignature> sig, long index,
@@ -108,18 +144,18 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
         {
             int version = BinaryReaders.ReadInt32BigEndian(binaryReader);
             if (version != 0 && version != 1)
-                throw new Exception("unknown version for HSS private key");
+                throw new IOException("unknown version for HSS private key");
 
             int d = BinaryReaders.ReadInt32BigEndian(binaryReader);
             if (d < 1 || d > 8) // RFC 8554, Section 6.
-                throw new InvalidDataException($"d value of HSS private key out of range: {d}");
+                throw new IOException($"d value of HSS private key out of range: {d}");
 
             long index = BinaryReaders.ReadInt64BigEndian(binaryReader);
 
             long maxIndex = BinaryReaders.ReadInt64BigEndian(binaryReader);
 
             if (index < 0 || maxIndex < 0 || index > maxIndex)
-                throw new InvalidDataException(
+                throw new IOException(
                     $"HSS private key index out of range: index={index} maxIndex={maxIndex}");
 
             bool limited = binaryReader.ReadBoolean();
@@ -168,7 +204,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             {
                 byte[] cachedRoot = pKey.GetRootKey().PeekRootT();
                 if (cachedRoot != null && !Arrays.AreEqual(cachedRoot, publicKey.LmsPublicKey.GetT1()))
-                    throw new InvalidDataException("HSS private key tree cache does not match the public key");
+                    throw new IOException("HSS private key tree cache does not match the public key");
             }
 
             return pKey;
@@ -308,10 +344,14 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
             LmsPrivateKeyParameters originalRootKey = this.GetRootKey();
 
+            // We need to replace the root key to a new q value; the last level reads the derived
+            // value itself, which for a single level hierarchy is the root.
             //
-            // We need to replace the root key to a new q value.
-            //
-            if (keys[0].GetIndex() - 1 != qTreePath[0])
+            bool rootQMatch = (qTreePath.Length > 1)
+                ? qTreePath[0] == keys[0].GetIndex() - 1
+                : qTreePath[0] == keys[0].GetIndex();
+
+            if (!rootQMatch)
             {
                 keys[0] = Lms.GenerateKeys(
                     originalRootKey.SigParameters,
@@ -531,14 +571,16 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
         public LmsContext GenerateLmsContext()
         {
             LmsSignedPubKey[] signed_pub_key;
-            LmsPrivateKeyParameters nextKey;
+            LmsContext context;
             int level = Level;
 
+            // the HSS index and the bottom key's q are two records of one position: claim both here,
+            // bottom key first so an exhausted one leaves each untouched.
             lock (this)
             {
                 Hss.RangeTestKeys(this);
 
-                nextKey = m_keys[level - 1];
+                LmsPrivateKeyParameters nextKey = m_keys[level - 1];
 
                 // Step 2. Stand in for sig[level-1]
                 int i = 0;
@@ -549,13 +591,15 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                     ++i;
                 }
 
+                context = nextKey.GenerateLmsContext();
+
                 //
                 // increment the index.
                 //
                 this.IncIndex();
             }
 
-            return nextKey.GenerateLmsContext().WithSignedPublicKeys(signed_pub_key);
+            return context.WithSignedPublicKeys(signed_pub_key);
         }
 
         public byte[] GenerateSignature(LmsContext context)

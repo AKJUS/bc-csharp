@@ -143,7 +143,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
             {
                 byte[] corrupt = Arrays.Clone(enc);
                 WriteU32(badD[i], corrupt, 4);
-                var ex = Assert.Throws<InvalidDataException>(
+                var ex = Assert.Throws<IOException>(
                     () => HssPrivateKeyParameters.GetInstance(corrupt), "no exception on d = " + badD[i]);
                 Assert.True(ex.Message.StartsWith("d value of HSS private key out of range"));
             }
@@ -155,7 +155,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
                 byte[] corrupt = Arrays.Clone(enc);
                 WriteU64(badIndex[i][0], corrupt, 8);
                 WriteU64(badIndex[i][1], corrupt, 16);
-                var ex = Assert.Throws<InvalidDataException>(
+                var ex = Assert.Throws<IOException>(
                     () => HssPrivateKeyParameters.GetInstance(corrupt),
                     "no exception on index = " + badIndex[i][0] + " maxIndex = " + badIndex[i][1]);
                 Assert.True(ex.Message.StartsWith("HSS private key index out of range"));
@@ -186,7 +186,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
             Assert.True(Arrays.AreEqual(pubA, decoded.GetPublicKey().GetEncoded()));
 
             // another key's public key: refused
-            var ex = Assert.Throws<InvalidDataException>(
+            var ex = Assert.Throws<IOException>(
                 () => HssPrivateKeyParameters.GetInstance(privA, pubB));
             Assert.True(ex.Message.StartsWith("HSS private key tree cache does not match"));
         }
@@ -1152,6 +1152,85 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms.Tests
 
             return (int)Pack_BE_To_UInt32(hssSignature, hssSignature.Length - h * m - 4);
         }
+
+        /// <summary>
+        /// Wrapping an LMS key as a single level HSS key keeps the key it was given, rather than regenerating it.
+        /// ResetKeyToIndex compares each level's q against the value derived from the HSS index, and an intermediate
+        /// level reads one past that value because it has already post incremented past the leaf it signed - but the
+        /// last level reads the derived value itself, and when the hierarchy has one level the root is the last level.
+        /// Applying the intermediate rule there made the comparison always fail, so every wrap rebuilt the whole
+        /// Merkle tree, so the tree was built twice - once to get the public key, once here - and the node cache the
+        /// first build filled was discarded with it.
+        /// </summary>
+        [Test]
+        public void SingleLevelWrapKeepsTheKey()
+        {
+            LMSigParameters sigParams = LMSigParameters.lms_sha256_n32_h5;
+            LMOtsParameters otsParams = LMOtsParameters.sha256_n32_w2;
+
+            LmsKeyPairGenerator gen = new LmsKeyPairGenerator();
+            gen.Init(new LmsKeyGenerationParameters(new LmsParameters(sigParams, otsParams), new SecureRandom()));
+            LmsPrivateKeyParameters lms = (LmsPrivateKeyParameters)gen.GenerateKeyPair().Private;
+
+            byte[] rootT1 = lms.GetPublicKey().GetT1();
+            // TODO[lms] IsTreeCachePrimed
+            //Assert.True(lms.IsTreeCachePrimed(), "expected the generator to leave the cache primed");
+
+            HssPrivateKeyParameters wrapped = new HssPrivateKeyParameters(lms, lms.GetIndex(),
+                lms.GetIndex() + lms.GetUsagesRemaining());
+
+            // TODO[lms] GetRootKey
+            //Assert.AreSame(lms, wrapped.GetRootKey(), "the wrap regenerated the root key");
+            Assert.AreSame(lms, wrapped.GetKeys()[0], "the wrap regenerated the root key");
+            // TODO[lms] GetRootKey, IsTreeCachePrimed
+            //Assert.True(wrapped.GetRootKey().IsTreeCachePrimed(), "the wrap discarded the tree cache");
+            Assert.That(Arrays.AreEqual(rootT1, wrapped.GetPublicKey().LmsPublicKey.GetT1()),
+                "the wrap changed the public key");
+
+            // and again from a position part way through the key
+            LmsSigner lmsSigner = new LmsSigner();
+            lmsSigner.Init(true, lms);
+            for (int i = 0; i != 3; i++)
+            {
+                lmsSigner.GenerateSignature(Hex.Decode("48656c6c6f"));
+            }
+            Assert.AreEqual(3, lms.GetIndex());
+
+            HssPrivateKeyParameters advanced = new HssPrivateKeyParameters(lms, lms.GetIndex(),
+                lms.GetIndex() + lms.GetUsagesRemaining());
+
+            // TODO[lms] GetRootKey
+            //Assert.AreSame(lms, advanced.GetRootKey(), "the wrap regenerated an advanced root key");
+            Assert.AreSame(lms, advanced.GetKeys()[0], "the wrap regenerated an advanced root key");
+            Assert.AreEqual(3, advanced.GetIndex(), "the wrap moved the index");
+
+            // the reset itself still works: asked for a different position, it does reposition
+            HssPrivateKeyParameters moved = new HssPrivateKeyParameters(lms, 1, 1 << sigParams.H);
+
+            // TODO[lms] GetRootKey
+            //Assert.NotSame(lms, moved.GetRootKey(), "the reset failed to reposition to a different index");
+            Assert.AreNotSame(lms, moved.GetKeys()[0], "the reset failed to reposition to a different index");
+            // TODO[lms] GetRootKey
+            //Assert.AreEqual(1, moved.GetRootKey().GetIndex());
+            Assert.AreEqual(1, moved.GetKeys()[0].GetIndex());
+
+            Assert.That(Arrays.AreEqual(rootT1, moved.GetPublicKey().LmsPublicKey.GetT1()),
+                "repositioning changed the public key");
+
+            // a signature from the wrapped key still verifies under the original public key
+            byte[] msg = Hex.Decode("6162636465");
+            HssSigner signer = new HssSigner();
+            signer.Init(true, advanced);
+            byte[] sig = signer.GenerateSignature(msg);
+
+            HssSigner verifier = new HssSigner();
+            verifier.Init(false, advanced.GetPublicKey());
+            Assert.True(verifier.VerifySignature(msg, sig), "wrapped key produced a signature that does not verify");
+        }
+
+        // TODO[lms] Port from bc-java (probably only after LMS API promoted)
+        [Test, Explicit]
+        public void IndexAndComponentIndexClaimedTogether() => throw new NotImplementedException();
 
         private static uint Pack_BE_To_UInt32(byte[] bs, int off)
         {

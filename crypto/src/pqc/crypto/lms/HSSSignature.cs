@@ -83,7 +83,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             {
                 var signature = Parse(L, stream);
                 if (stream.Position != stream.Length)
-                    throw new InvalidDataException("unexpected data found after HSS signature");
+                    throw new IOException("unexpected data found after HSS signature");
                 return signature;
             }
         }

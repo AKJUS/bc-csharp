@@ -42,14 +42,20 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
 
         public LmsPrivateKeyParameters(LMSigParameters lmsParameter, LMOtsParameters otsParameters, int q, byte[] I,
             int maxQ, byte[] masterSecret)
-            : this(lmsParameter, otsParameters, q, I, maxQ, masterSecret, false)
-        {
-        }
-
-        internal LmsPrivateKeyParameters(LMSigParameters lmsParameter, LMOtsParameters otsParameters, int q, byte[] I,
-            int maxQ, byte[] masterSecret, bool isPlaceholder)
             : base(true)
         {
+            // the checks the decoder applies, so a key built directly is not one it would refuse
+            if (lmsParameter == null || otsParameters == null)
+                throw new ArgumentException("LMS private key needs both parameter sets");
+            if (I == null || I.Length != 16)
+                throw new ArgumentException("LMS key identifier I must be 16 bytes");
+            if (masterSecret == null || masterSecret.Length < lmsParameter.M)
+                throw new ArgumentException("master secret is less than " + lmsParameter.M);
+
+            int twoToH = 1 << lmsParameter.H;
+            if (q < 0 || maxQ < 0 || maxQ > twoToH || q > maxQ)
+                throw new ArgumentException($"LMS private key q/maxQ out of range: q={q} maxQ={maxQ} 2^h={twoToH}");
+
             this.sigParameters = lmsParameter;
             this.otsParameters = otsParameters;
             this.q = q;
@@ -58,7 +64,27 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             this.masterSecret = Arrays.Clone(masterSecret);
             this.maxCacheR = 1 << (sigParameters.H + 1);
             this.tCache = new ConcurrentDictionary<int, byte[]>();
-            this.m_isPlaceholder = isPlaceholder;
+        }
+
+        /**
+         * A key with no position, identifier or seed of its own - the placeholder an HSS hierarchy is
+         * built with for the levels below the root, each of which resetKeyToIndex replaces from the
+         * level above before the key is used. The sentinel values are deliberately ones the public
+         * constructor refuses, so a placeholder can never be mistaken for a key that was merely built
+         * carelessly; a subclass using this must not present the result as a usable key.
+         */
+        internal LmsPrivateKeyParameters(LMSigParameters lmsParameter, LMOtsParameters otsParameters, int maxQ)
+            : base(true)
+        {
+            this.sigParameters = lmsParameter;
+            this.otsParameters = otsParameters;
+            this.q = -1;
+            this.I = new byte[0];
+            this.maxQ = maxQ;
+            this.masterSecret = new byte[0];
+            this.maxCacheR = 1 << (sigParameters.H + 1);
+            this.tCache = new ConcurrentDictionary<int, byte[]>();
+            this.m_isPlaceholder = true;
         }
 
         private LmsPrivateKeyParameters(LmsPrivateKeyParameters parent, int q, int maxQ)
@@ -140,7 +166,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
         {
             int version = BinaryReaders.ReadInt32BigEndian(binaryReader);
             if (version != 0)
-                throw new Exception("unknown version for LMS private key");
+                throw new IOException("expected version 0 lms private key");
 
             LMSigParameters sigParameter = LMSigParameters.ParseByID(binaryReader);
             LMOtsParameters otsParameter = LMOtsParameters.ParseByID(binaryReader);
@@ -158,13 +184,17 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             // legitimate exhausted state.
             int twoToH = 1 << sigParameter.H;
             if (q < 0 || maxQ < 0 || maxQ > twoToH || q > maxQ)
-                throw new InvalidDataException(
+                throw new IOException(
                     $"LMS private key q/maxQ out of range: q={q} maxQ={maxQ} 2^h={twoToH}");
 
             int l = BinaryReaders.ReadInt32BigEndian(binaryReader);
-            if (l < 0)
-                throw new Exception("secret length less than zero");
+            if (l < sigParameter.M)
+            {
+                // SP 800-208 sec. 6.1 requires SEED to be n bytes; GenerateKey has always required m
+                throw new IOException($"secret length less than {sigParameter.M}: {l}");
+            }
 
+            // TODO[lms] Guard against stream limit if available, or at least incremental read fully
             byte[] masterSecret = BinaryReaders.ReadBytesFully(binaryReader, l);
 
             return new LmsPrivateKeyParameters(sigParameter, otsParameter, q, I, maxQ, masterSecret);
@@ -174,16 +204,19 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
         {
             int cacheCount = BinaryReaders.ReadInt32BigEndian(binaryReader);
             if (cacheCount < 0 || cacheCount >= CacheTopLimit)
-                throw new InvalidDataException($"tree cache node count out of range: {cacheCount}");
+                throw new IOException($"tree cache node count out of range: {cacheCount}");
+            if (cacheCount != 0 && (cacheCount < 3 || ((cacheCount + 1) & cacheCount) != 0))
+                throw new IOException("tree cache node count is not a complete top of tree: " + cacheCount);
 
             int m = key.sigParameters.M;
             var stream = binaryReader.BaseStream;
             if (stream.CanSeek && (long)cacheCount * m > stream.Length - stream.Position)
-                throw new InvalidDataException($"tree cache length exceeded {stream.Length - stream.Position}");
+                throw new IOException($"tree cache length exceeded {stream.Length - stream.Position}");
 
             byte[][] cachedT = new byte[cacheCount + 1][];
             for (int r = 1; r <= cacheCount; r++)
             {
+                // TODO[lms] Guard against stream limit if available, or at least incremental read fully
                 cachedT[r] = BinaryReaders.ReadBytesFully(binaryReader, m);
             }
 
@@ -205,6 +238,16 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
          * cached - so bit rot or a partial write in the stored key is refused here rather than primed into the
          * tree, where it would change the public key the key reports or yield a signature that does not verify
          * (bc-java github #2414).
+         * <p>
+         * That every node is covered holds only because the caller has already refused any node count
+         * that is not a complete top of tree - 2^k - 1 nodes, k at least 2. A node with no cached
+         * sibling pair above it is read but never recomputed: at a count of 1 or 2 that is the root
+         * itself, and at any even count it is the last node, whose parent would need the sibling the
+         * count stops one short of. Every node of a complete top of tree is either recomputed from its
+         * two children or is an input to its own parent's recomputation, so the guarantee above is
+         * exact. This writer emits 63, or 31 for a height-5 shard, so the restriction refuses nothing
+         * it produces.
+         * </p>
          * <p>
          * Only interior nodes are recomputed. A cached node at or beyond 2^h is a leaf, and deriving one costs
          * an LM-OTS public key - which is the work the cache exists to avoid; a corrupt leaf is still caught,
@@ -228,7 +271,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                 digest.DoFinal(node, 0);
 
                 if (!Arrays.AreEqual(node, cachedT[r]))
-                    throw new InvalidDataException($"LMS private key tree cache inconsistent at node {r}");
+                    throw new IOException($"LMS private key tree cache inconsistent at node {r}");
             }
         }
 
@@ -252,9 +295,18 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             // work the cache exists to avoid (bc-java github #2414).
             if (publicKey != null)
             {
+                // cross-check rather than adopt, as the HSS twin does; the root only where it is cached
+                if (!Arrays.AreEqual(pKey.I, publicKey.GetI()) ||
+                    pKey.SigParameters.ID != publicKey.GetSigParameters().ID ||
+                    pKey.OtsParameters.ID != publicKey.GetOtsParameters().ID)
+                {
+                    throw new IOException("LMS public key does not match the private key");
+                }
+
                 byte[] cachedRoot = pKey.PeekRootT();
+
                 if (cachedRoot != null && !Arrays.AreEqual(cachedRoot, publicKey.GetT1()))
-                    throw new InvalidDataException("LMS private key tree cache does not match the public key");
+                    throw new IOException("LMS private key tree cache does not match the public key");
             }
 
             lock (pKey)

@@ -19,7 +19,7 @@ namespace Org.BouncyCastle.Utilities.IO
             {
                 T t = Parse(parse, stream, leaveOpen: true);
                 if (stream.Position != stream.Length)
-                    throw new InvalidDataException($"unexpected data found after {description}");
+                    throw new IOException($"unexpected data found after {description}");
                 return t;
             }
         }
